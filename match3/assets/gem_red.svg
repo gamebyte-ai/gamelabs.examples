@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#ff6b8a"/>
+      <stop offset="50%" stop-color="#e11d48"/>
+      <stop offset="100%" stop-color="#9f1239"/>
+    </linearGradient>
+    <filter id="s">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- Diamond shape -->
+  <polygon points="64,12 112,64 64,116 16,64" fill="url(#g)" stroke="#fff" stroke-width="2" stroke-opacity="0.3" filter="url(#s)"/>
+  <!-- Inner highlight facet -->
+  <polygon points="64,24 98,64 64,104 30,64" fill="none" stroke="#ff9bb5" stroke-width="1.5" stroke-opacity="0.5"/>
+  <!-- Top shine -->
+  <polygon points="64,20 88,52 64,44 40,52" fill="#fff" fill-opacity="0.25"/>
+</svg>

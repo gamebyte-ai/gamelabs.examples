@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#6ee7a0"/>
+      <stop offset="50%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <filter id="s">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- Hexagon shape -->
+  <polygon points="64,14 110,38 110,90 64,114 18,90 18,38" fill="url(#g)" stroke="#fff" stroke-width="2" stroke-opacity="0.3" filter="url(#s)"/>
+  <!-- Inner hexagon -->
+  <polygon points="64,28 98,46 98,82 64,100 30,82 30,46" fill="none" stroke="#86efac" stroke-width="1.5" stroke-opacity="0.5"/>
+  <!-- Top shine -->
+  <polygon points="64,22 94,40 64,36 34,40" fill="#fff" fill-opacity="0.25"/>
+</svg>

@@ -1,0 +1,22 @@
+{
+  "name": "gamelabsjs-match3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@js-basics/vector": "^2.2.5",
+    "@pixi/layout": "^3.2.0",
+    "@pixi/ui": "^2.3.2",
+    "gsap": "^3.12.5",
+    "@gamebyte/gamelabsjs": "^3.1.0",
+    "pixi.js": "^8.16.0",
+    "three": "^0.182.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@gamebyte/gamelabsjs": ["../../dist/index.d.ts"],
+      "pixi.js": ["../../node_modules/pixi.js"],
+      "pixi.js/*": ["../../node_modules/pixi.js/*"],
+      "@pixi/layout": ["../../node_modules/@pixi/layout"],
+      "@pixi/ui": ["../../node_modules/@pixi/ui"]
+    },
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,23 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="rim" cx="128" cy="128" r="128" gradientUnits="userSpaceOnUse">
+      <stop offset="60%" stop-color="black" stop-opacity="0"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.5"/>
+    </radialGradient>
+    <radialGradient id="hl" cx="82" cy="77" r="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="white" stop-opacity="0.55"/>
+      <stop offset="40%" stop-color="white" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Body: near-black with subtle highlight + rim, same template as the
+       coloured bubble sprites so the bomb reads as a member of the family. -->
+  <rect width="256" height="256" fill="rgb(38,38,42)"/>
+  <rect width="256" height="256" fill="url(#rim)"/>
+  <rect width="256" height="256" fill="url(#hl)"/>
+  <!-- Fuse: short curved cord above the bomb body. -->
+  <path d="M 145 55 Q 168 22 188 48" stroke="rgb(150,100,50)" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <!-- Spark: bright glow at the fuse tip. -->
+  <circle cx="188" cy="48" r="11" fill="rgb(255,200,60)"/>
+  <circle cx="188" cy="48" r="5" fill="rgb(255,255,210)"/>
+</svg>

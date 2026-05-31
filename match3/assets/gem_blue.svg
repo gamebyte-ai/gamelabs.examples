@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#7cb8ff"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <filter id="s">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- Circle shape -->
+  <circle cx="64" cy="64" r="50" fill="url(#g)" stroke="#fff" stroke-width="2" stroke-opacity="0.3" filter="url(#s)"/>
+  <!-- Inner ring -->
+  <circle cx="64" cy="64" r="38" fill="none" stroke="#93c5fd" stroke-width="1.5" stroke-opacity="0.5"/>
+  <!-- Top shine -->
+  <ellipse cx="52" cy="44" rx="20" ry="14" fill="#fff" fill-opacity="0.25"/>
+</svg>

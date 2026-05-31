@@ -1,0 +1,19 @@
+{
+  "name": "gamelabsjs-towerdefense",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@gamebyte/gamelabsjs": "^3.1.0",
+    "@pixi/layout": "^3.2.0",
+    "@pixi/ui": "^2.3.2",
+    "pixi.js": "^8.17.1",
+    "three": "^0.182.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

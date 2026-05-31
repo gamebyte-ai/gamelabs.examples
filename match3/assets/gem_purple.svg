@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="50%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#7e22ce"/>
+    </linearGradient>
+    <filter id="s">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- Triangle shape -->
+  <polygon points="64,12 118,108 10,108" fill="url(#g)" stroke="#fff" stroke-width="2" stroke-opacity="0.3" filter="url(#s)"/>
+  <!-- Inner triangle -->
+  <polygon points="64,32 104,98 24,98" fill="none" stroke="#d8b4fe" stroke-width="1.5" stroke-opacity="0.5"/>
+  <!-- Top shine -->
+  <polygon points="64,20 80,56 48,56" fill="#fff" fill-opacity="0.25"/>
+</svg>
