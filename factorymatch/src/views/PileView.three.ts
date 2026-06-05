@@ -37,6 +37,8 @@ export class PileView extends WorldViewBase implements IPileView {
   /** Slotted (collected) shapes by item id, plus their display order. */
   private readonly _slots = new Map<number, SlotMesh>();
   private _order: number[] = [];
+  /** Pending post-match delayed callbacks, killed on reset so a stale one can't pop a fresh item. */
+  private readonly _pending = new Set<gsap.core.Tween>();
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -100,15 +102,21 @@ export class PileView extends WorldViewBase implements IPileView {
     if (result.clearedIds.length > 0) {
       const cleared = new Set(result.clearedIds);
       // Let the flown shape land, then pop the trio and slide survivors closed.
-      gsap.delayedCall(cfg.anim.fly, () => {
+      // Tracked + killed by clearSlots so a restart within the delay can't pop a
+      // freshly collected item that reused a cleared id.
+      const call = gsap.delayedCall(cfg.anim.fly, () => {
+        this._pending.delete(call);
         for (const id of cleared) this._pop(id);
         this._order = this._order.filter((id) => !cleared.has(id));
         this._layout(null);
       });
+      this._pending.add(call);
     }
   }
 
   public clearSlots(): void {
+    for (const call of this._pending) call.kill();
+    this._pending.clear();
     for (const { obj } of this._slots.values()) {
       gsap.killTweensOf(obj.position);
       gsap.killTweensOf(obj.scale);

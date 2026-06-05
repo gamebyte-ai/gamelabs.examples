@@ -193,7 +193,13 @@ export class CastleOperations {
 
   private _checkLose(): void {
     const model = this._model!;
-    if (model.ammoLeft > 0 || this._ballEntities.size > 0 || !this._allSettled()) return;
+    // Don't overwrite a win decided earlier this frame.
+    if (model.status !== "playing") return;
+    // Lose once ammo is gone and the world has come to rest. We check
+    // _allSettled (which covers every dynamic body, balls included) rather than
+    // requiring balls to be gone — a ball resting on-screen is "done", and
+    // gating on _ballEntities.size would make the lose state unreachable.
+    if (model.ammoLeft > 0 || !this._allSettled()) return;
     model.setStatus("lost");
   }
 
