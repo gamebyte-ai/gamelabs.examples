@@ -38,6 +38,22 @@ npm run dev
 
 See each example's own `README.md` (where present) for gameplay rules and implementation notes.
 
+## Playable-ad (single-page) builds
+
+Every example also builds as a **playable ad**: one self-contained `dist-playable/index.playable.html`
+with all JS, CSS, and assets inlined as `data:` URIs (no external requests), ready to upload to an ad
+network. From any example directory:
+
+```bash
+npm run playable:build   # → dist-playable/index.playable.html
+npm run playable:dev     # serve the single-file entry for QA
+```
+
+It reuses the regular `src/main.ts` entry; Vite's single-file build (`vite-plugin-singlefile` +
+`assetsInlineLimit`) inlines both the example's own assets and the framework's default UI textures
+automatically. Mind each network's size cap (Meta 2 MB, TikTok 2.4 MB, IronSource 3 MB, Google /
+Unity / AppLovin 5 MB) — heavy assets (e.g. large `.glb` models) inflate the single file.
+
 ## Requirements
 
 - Node.js 20 or 22

@@ -34,3 +34,6 @@ Thumbs.db
 # Misc
 .eslintcache
 *.tsbuildinfo
+
+# Playable-ad single-file build output
+dist-playable/

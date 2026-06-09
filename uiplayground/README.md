@@ -172,3 +172,20 @@ npm run typecheck
 ```
 
 Or from the repo root: `./RunUIPlayground.sh`.
+
+## Playable-ad (single-page) build
+
+```bash
+npm run playable:build   # one self-contained dist-playable/index.playable.html
+npm run playable:dev     # serve it locally on http://localhost:5314
+```
+
+`npm run playable:build` produces a single self-contained `dist-playable/index.playable.html`
+with all JS, CSS, and assets inlined as `data:` URIs — no external requests are made when the
+file is opened. `npm run playable:dev` serves the same entry point on port 5314 for QA.
+
+Both commands reuse `src/main.ts` (the same code as the normal build) via
+`vite.playable.config.ts`. The single-file build inlines assets and framework textures
+automatically, so the resulting HTML can be dropped straight into an ad network as a playable.
+This example ships many UI textures, so its single HTML is larger than the other examples — that
+is expected.

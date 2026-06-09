@@ -7,7 +7,9 @@
     "build": "vite build",
     "build:models": "node scripts/generateBrickModels.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "playable:dev": "vite --config vite.playable.config.ts",
+    "playable:build": "vite build --config vite.playable.config.ts"
   },
   "dependencies": {
     "@pixi/layout": "^3.2.0",
@@ -20,6 +22,7 @@
     "vite": "^7.3.1"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }

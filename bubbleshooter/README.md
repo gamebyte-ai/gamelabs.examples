@@ -108,3 +108,15 @@ Bubble settles in bottom row → "GAME OVER"
 npm install
 npm run dev
 ```
+
+## Playable-ad (single-page) build
+
+`npm run playable:build` produces a single self-contained `dist-playable/index.playable.html`
+with all JS, CSS, and assets inlined as `data:` URIs — no external requests, ready to upload
+to an ad network as-is.
+
+`npm run playable:dev` serves the same single-file entry locally (on port 5303) for QA.
+
+It reuses the regular `src/main.ts` entry — Vite's single-file build automatically inlines
+both the example's own `new URL(...)` assets and the framework's default UI textures, so no
+extra wiring is needed.
