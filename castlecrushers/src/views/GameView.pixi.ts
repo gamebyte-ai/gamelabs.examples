@@ -13,30 +13,28 @@ const COLORS: Record<PieceKind, { fill: number; stroke: number }> = {
   ball: { fill: 0xb23b3b, stroke: 0x7d2727 },
 };
 
-const LETTERBOX_COLOR = 0x05080c;
-
 /**
  * The game-objects view, rendered with Pixi on the HUD **Content** layer (the
  * bottom layer, below the UI Screen layer). This is a pure-2D game that needs
  * no World-only tools, so it stays in Pixi/screen-pixel space — physics design
  * coordinates map 1:1 to what we draw (no 2D↔3D conversion). It never reads the
  * physics world: `createEntity` returns the `Physics2DEntityView` the stage drives.
+ *
+ * Aspect/letterboxing is handled by the framework (`viewport: { fit: "contain" }`
+ * in the app config), which sizes the canvas to a 1280x720 play-rect and paints
+ * the inert bars. This view only does a uniform design→canvas scale of `_root`.
  */
 export class GameView extends HudViewBase implements IGameView {
   private _config: CastleCrushersConfig | null = null;
   private _designW = 1280;
   private _designH = 720;
 
-  /** Screen-space bars filling the viewport outside the play area. */
-  private readonly _letterbox = new PIXI.Graphics();
-  /** Design-space layer; scaled + centered to fit the viewport on resize. */
+  /** Design-space layer; scaled to map the 1280x720 design onto the play-rect canvas. */
   private readonly _root = new PIXI.Container();
   private readonly _sky = new PIXI.Graphics();
   private readonly _launchMarker = new PIXI.Graphics();
   private readonly _pieces = new PIXI.Container();
   private readonly _aim = new PIXI.Graphics();
-  /** Screen-space rect clipping `_root` to the play area (no spill into the bars). */
-  private readonly _clipMask = new PIXI.Graphics();
 
   private readonly _aimMove = new Set<(x: number, y: number) => void>();
   private readonly _aimRelease = new Set<(x: number, y: number) => void>();
@@ -55,9 +53,7 @@ export class GameView extends HudViewBase implements IGameView {
     this._drawLaunchMarker();
     this._root.addChild(this._sky, this._launchMarker, this._pieces, this._aim);
 
-    // Letterbox bars behind the play area; play area clipped to the design rect.
-    this.addChild(this._letterbox, this._root, this._clipMask);
-    this._root.mask = this._clipMask;
+    this.addChild(this._root);
 
     this.eventMode = "static";
     this.on("pointerdown", this._onPointerDown, this);
@@ -149,19 +145,12 @@ export class GameView extends HudViewBase implements IGameView {
     super.onResize(width, height, dpr);
     const w = Math.max(1, width);
     const h = Math.max(1, height);
+    // The framework locks the canvas to the design aspect, so this is a uniform
+    // design→canvas scale; `min` + centering only absorbs sub-pixel rounding.
     const scale = Math.min(w / this._designW, h / this._designH);
-    const px = (w - this._designW * scale) / 2;
-    const py = (h - this._designH * scale) / 2;
     this._root.scale.set(scale);
-    this._root.position.set(px, py);
+    this._root.position.set((w - this._designW * scale) / 2, (h - this._designH * scale) / 2);
     this.hitArea = new PIXI.Rectangle(0, 0, w, h);
-
-    // Fill the whole viewport with the letterbox color...
-    this._letterbox.clear();
-    this._letterbox.rect(0, 0, w, h).fill(LETTERBOX_COLOR);
-    // ...and clip the play area to the (scaled, centered) design rect.
-    this._clipMask.clear();
-    this._clipMask.rect(px, py, this._designW * scale, this._designH * scale).fill(0xffffff);
   }
 
   //  VISUALS
