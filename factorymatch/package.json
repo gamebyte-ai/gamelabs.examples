@@ -13,7 +13,7 @@
   "dependencies": {
     "@pixi/layout": "^3.2.0",
     "@pixi/ui": "^2.3.2",
-    "@gamebyte/gamelabsjs": "^3.1.0",
+    "@gamebyte/gamelabsjs": "^3.2.0",
     "cannon-es": "^0.20.0",
     "gsap": "^3.12.0",
     "pixi.js": "^8.16.0",
