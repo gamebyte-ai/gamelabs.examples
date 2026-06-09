@@ -13,12 +13,25 @@ import { GameEvents } from "./events/GameEvents";
 import { CastleOperations } from "./utilities/CastleOperations";
 
 export class CastleCrushersApp extends GamelabsApp {
-  private readonly _config = new CastleCrushersConfig();
+  private readonly _config: CastleCrushersConfig;
   private _physicsUnsub: Unsubscribe | null = null;
   private _gameView: GameView | null = null;
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    const config = new CastleCrushersConfig();
+    super({
+      mount: stageEl,
+      // Lock the play area to the 1280x720 design aspect so the game never
+      // stretches: the framework pillarboxes/letterboxes both canvases and the
+      // surrounding bars (this color) are inert dead-zones. The view then only
+      // does a uniform design→canvas scale — no bars/clip of its own.
+      viewport: {
+        fit: "contain",
+        aspectRatio: config.design.width / config.design.height,
+        background: "#05080c",
+      },
+    });
+    this._config = config;
   }
 
   protected override registerModules(): void {
