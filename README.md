@@ -36,6 +36,7 @@ npm run dev
 | `castlecrushers` | 5188 | 2D physics sandbox (matter-js via the optional `physics2d` module): flick cannonballs to topple a block castle |
 | `factorymatch` | 5189 | 3D physics collector (cannon-es via the optional `physics3d` module): pick shapes from a tumbling pile, match 3 of a kind |
 | `example_template` | 5190 | Minimum starting point: one `GameScreen` with a title and empty world — copy this folder to scaffold a new game |
+| `blockpuzzle` | 5191 | Grid block-placement puzzle: drag tray pieces onto an 8×8 grid, clear lines, with Hammer / Tray Refresh / Unit Block boosters and combo scoring |
 
 See each example's own `README.md` (where present) for gameplay rules and implementation notes.
 
