@@ -38,12 +38,3 @@ castlecrushers/src
     ├── GameView.pixi.ts            # HUD Content layer: game objects (Pixi) + aim line + pointer; never reads physics
     └── GameScreenView.pixi.ts      # HUD Screen layer: cannonball count + banner (UI only)
 ```
-
-## Playable-ad (single-page) build
-
-```bash
-npm run playable:build   # → dist-playable/index.playable.html
-npm run playable:dev     # serve the playable on http://localhost:5304
-```
-
-`npm run playable:build` produces one self-contained `dist-playable/index.playable.html` with all JS, CSS, and assets inlined as `data:` URIs — no external requests. `npm run playable:dev` serves it on port `5304`. The playable reuses the regular `src/main.ts` entry; Vite single-file (`vite-plugin-singlefile`) inlines the bundled assets and framework textures automatically.

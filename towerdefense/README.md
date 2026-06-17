@@ -105,12 +105,3 @@ Enemy reaches base → onEnemyReachedBase → base HP drops → game over when 0
 npm install
 npm run dev
 ```
-
-## Playable-ad (single-page) build
-
-```bash
-npm run playable:build   # → dist-playable/index.playable.html
-npm run playable:dev     # serve the playable on http://localhost:5313
-```
-
-`npm run playable:build` produces one self-contained `dist-playable/index.playable.html` with all JS, CSS, and assets inlined as `data:` URIs — no external requests. `npm run playable:dev` serves it on port `5313`. The playable reuses the regular `src/main.ts` entry; Vite single-file (`vite-plugin-singlefile`) inlines the bundled assets and framework textures automatically.

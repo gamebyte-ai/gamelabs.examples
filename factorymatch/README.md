@@ -44,12 +44,3 @@ factorymatch/src
     ├── PileView.three.ts           # World: bin + pile + 3D slot rack (GSAP fly/slide/pop) + pick ray
     └── FactoryScreenView.pixi.ts   # HUD: score + banner (UI only)
 ```
-
-## Playable-ad (single-page) build
-
-```bash
-npm run playable:build   # → dist-playable/index.playable.html
-npm run playable:dev     # serve the playable on http://localhost:5306
-```
-
-`npm run playable:build` produces one self-contained `dist-playable/index.playable.html` with all JS, CSS, and assets inlined as `data:` URIs — no external requests. `npm run playable:dev` serves it on port `5306`. The playable reuses the regular `src/main.ts` entry; Vite single-file (`vite-plugin-singlefile`) inlines the bundled assets and framework textures automatically.

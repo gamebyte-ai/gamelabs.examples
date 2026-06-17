@@ -60,18 +60,3 @@ watersort
 ```bash
 cd examples/watersort && npm install && npm run dev
 ```
-
-## Playable-ad (single-page) build
-
-```bash
-npm run playable:build   # one self-contained dist-playable/index.playable.html
-npm run playable:dev     # serve it locally on http://localhost:5315
-```
-
-`npm run playable:build` produces a single self-contained `dist-playable/index.playable.html`
-with all JS, CSS, and assets inlined as `data:` URIs — no external requests are made when the
-file is opened. `npm run playable:dev` serves the same entry point on port 5315 for QA.
-
-Both commands reuse `src/main.ts` (the same game code as the normal build) via
-`vite.playable.config.ts`. The single-file build inlines game assets and framework textures
-automatically, so the resulting HTML can be dropped straight into an ad network as a playable.
