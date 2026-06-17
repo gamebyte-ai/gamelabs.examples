@@ -35,6 +35,7 @@ npm run dev
 | `towerdefense` | 5187 | Tower defense with pure-state managers and reconcile-based rendering |
 | `castlecrushers` | 5188 | 2D physics sandbox (matter-js via the optional `physics2d` module): flick cannonballs to topple a block castle |
 | `factorymatch` | 5189 | 3D physics collector (cannon-es via the optional `physics3d` module): pick shapes from a tumbling pile, match 3 of a kind |
+| `example_template` | 5190 | Minimum starting point: one `GameScreen` with a title and empty world — copy this folder to scaffold a new game |
 
 See each example's own `README.md` (where present) for gameplay rules and implementation notes.
 
