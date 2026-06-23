@@ -1,4 +1,5 @@
 import * as PIXI from "pixi.js";
+import gsap from "gsap";
 import { ScreenView, type IInstanceResolver } from "@gamebyte/gamelabsjs";
 
 import type { GameResult, IFactoryScreenView } from "./IFactoryScreenView.js";
@@ -83,8 +84,8 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
       if (iconTex) {
         const icon = new PIXI.Sprite(iconTex);
         icon.anchor.set(0.5);
-        icon.scale.set((GOAL_H * 0.52) / iconTex.height);
-        icon.position.set(0, -GOAL_H * 0.08);
+        icon.scale.set(this._config!.hud.goalIconH / iconTex.height);
+        icon.position.set(0, this._config!.hud.goalIconY);
         chip.addChild(icon);
       }
       value.text = String(goal.target);
@@ -117,6 +118,23 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   public setGoal(index: number, count: number): void {
     const value = this._goalValues[index];
     if (value) value.text = String(count);
+  }
+
+  /** Pop the goal chip (scale up, then settle back) to acknowledge a collection. */
+  public pulseGoal(index: number): void {
+    const chip = this._goals[index];
+    if (!chip) return;
+    const hud = this._config!.hud;
+    gsap.killTweensOf(chip.scale);
+    chip.scale.set(1);
+    gsap.to(chip.scale, {
+      x: hud.goalPulseScale,
+      y: hud.goalPulseScale,
+      duration: hud.goalPulseDuration,
+      ease: "power2.out",
+      yoyo: true,
+      repeat: 1,
+    });
   }
 
   public showResult(result: GameResult): void {

@@ -65,12 +65,13 @@ export class FactoryMatchConfig {
     trayDrop: 0.25, // how long the tray's fall takes — AND, symmetrically, its rise back (seconds); both block + tray reach the lowest point at the same instant. SMALLER = tray starts later and falls faster; LARGER = starts earlier and falls slower (if it exceeds `fly`, the whole flight stretches to match).
     matchRise: 0.2,
     matchCollapse: 0.2,
+    shiftStagger: 0.05, // delay between consecutive items' reorder hops (seconds) — 0 = all hop together
   };
 
   public readonly kinds: Record<Kind, KindDef> = {
     dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
     billardball: { color: 0x1a1a1a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
-    guitar: { color: 0x8a5a2b, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    guitar: { color: 0xebc26a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
     radio: { color: 0x2bb1a8, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
     gascan: { color: 0xd23b2e, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
   };
@@ -87,16 +88,35 @@ export class FactoryMatchConfig {
     rotation: {
       dice: { x: 0, y: 0, z: 0 },
       billardball: { x: 0, y: 0, z: 0 },
-      guitar: { x: -90, y: 0, z: 0 },
-      radio: { x: 180, y: 0, z: 0 },
-      gascan: { x: 0, y: 0, z: 0 },
+      guitar: { x: -90, y: 0, z: 180 },
+      radio: { x: 90, y: 180, z: 0 },
+      gascan: { x: 90  , y:  180, z: 20 },
     },
   };
 
   /** How many of each kind to drop into the bin (multiples of matchCount → fully clearable). */
   public readonly spawnPerKind = 12;
-  /** Horizontal jitter + vertical stagger for the initial drop. */
+  /** Initial drop placement. `baseY` is the lowest spawn height; each successive
+   * item is staggered `stepY` higher (so they don't spawn inside each other), and
+   * `areaHalf` is the x/z jitter. Drop height grows with item count — the topmost
+   * item starts at baseY + (count-1) * stepY, so lower stepY/baseY to drop lower. */
   public readonly spawn = { areaHalf: 1.0, baseY: 1.3, stepY: 0.45 };
+
+  /** World physics (applied to ALL contacts via the engine's default contact
+   * material, so it governs item↔item piling, not just item↔floor). `gravity` is
+   * the y acceleration (m/s², more negative = faster fall); `restitution` is the
+   * bounce [0,1]; `friction` resists sliding. */
+  public readonly physics = {
+    gravity: -12.82,
+    restitution: 0,
+    friction: 1,
+    // The pile is simulated only in short bursts, then frozen, so idle items
+    // don't jitter forever. `settleSeconds` is the physics-on window after each
+    // pick; `initialSettleSeconds` is the longer window after a (re)build so the
+    // first drop has time to come to rest before freezing.
+    settleSeconds:0.5,
+    initialSettleSeconds: 3.6,
+  };
 
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
   public readonly slots = { capacity: 7, matchCount: 3, matchPoints: 10 };
@@ -117,8 +137,18 @@ export class FactoryMatchConfig {
   /** HUD layout (screen pixels). `topY` is the timer + score row centre; `goalsY`
    * is the goal chips' row centre (both from the top of the screen). `goalFontSize`
    * sizes the goal count text; `goalTextY` offsets that text from the chip centre
-   * (positive = down). */
-  public readonly hud = { topY: 62, goalsY: 142, goalFontSize: 15, goalTextY: 24 };
+   * (positive = down). `goalIconH` is the goal item icon's on-screen height;
+   * `goalIconY` offsets it from the chip centre (negative = up). */
+  public readonly hud = {
+    topY: 62,
+    goalsY: 142,
+    goalFontSize: 15,
+    goalTextY: 24,
+    goalIconH: 46,
+    goalIconY: -14,
+    goalPulseScale: 1.3, // peak scale of a goal chip's pop when its count ticks down
+    goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
+  };
 
   /** Fixed 3D camera looking down into the bin.
    * `orthographic` swaps the perspective camera for an isometric-style parallel

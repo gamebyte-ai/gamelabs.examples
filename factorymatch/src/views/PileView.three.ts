@@ -203,6 +203,7 @@ export class PileView extends WorldViewBase implements IPileView {
   /** Group by kind (stable), then animate every slotted shape to its rack position. */
   private _layout(flownId: number | null): void {
     const cfg = this._config!;
+    let movedCount = 0; // staggers reorder hops so shifting items move in sequence
     this._order.forEach((id, index) => {
       const slot = this._slots.get(id);
       if (!slot) return;
@@ -252,17 +253,27 @@ export class PileView extends WorldViewBase implements IPileView {
         const drop = Math.max(cfg.anim.trayDrop, 0);
         const hopTime = Math.max(cfg.anim.slide, drop); // stretched if the tray needs longer to give way
         const peakY = seatY + cfg.rack.shiftHop;
+        // Shifting items hop one after another, a small fixed delay apart.
+        const startDelay = movedCount * Math.max(cfg.anim.shiftStagger, 0);
+        movedCount += 1;
         gsap.killTweensOf(slot.obj.position);
-        gsap.to(slot.obj.position, { x: target.x, z: target.z, duration: hopTime, ease: "power2.inOut" });
+        gsap.to(slot.obj.position, {
+          x: target.x,
+          z: target.z,
+          duration: hopTime,
+          delay: startDelay,
+          ease: "power2.inOut",
+        });
         gsap.to(slot.obj.position, {
           keyframes: [
             { y: peakY, duration: hopTime * 0.4, ease: "power2.out" }, // hop up
             { y: seatY - dip, duration: hopTime * 0.6, ease: "power2.in" }, // come down onto the new slot
             { y: seatY, duration: drop, ease: "back.out(2.5)" }, // settle back up with the tray
           ],
+          delay: startDelay,
         });
         // The destination pad gives way as the hopping item lands on it.
-        this._suspend(index, drop, hopTime);
+        this._suspend(index, drop, hopTime, startDelay);
       }
     });
   }
@@ -338,11 +349,11 @@ export class PileView extends WorldViewBase implements IPileView {
    * at the same instant the block does (`landTime`) — then both rise back to rest
    * over the same `drop` duration. Fall and rise are symmetric, both tracking
    * `trayDrop`. */
-  private _suspend(index: number, drop: number, landTime: number): void {
+  private _suspend(index: number, drop: number, landTime: number, startDelay = 0): void {
     const pad = this._pads[index];
     if (!pad) return;
     const dip = this._config!.rack.suspensionDip;
-    const delay = Math.max(0, landTime - drop);
+    const delay = startDelay + Math.max(0, landTime - drop);
     gsap.killTweensOf(pad.position);
     gsap.to(pad.position, {
       keyframes: [

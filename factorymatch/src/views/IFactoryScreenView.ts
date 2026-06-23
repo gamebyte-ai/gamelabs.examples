@@ -9,6 +9,7 @@ export interface IFactoryScreenView extends IScreenView {
   setScore(score: number): void;
   setTime(text: string): void;
   setGoal(index: number, count: number): void;
+  pulseGoal(index: number): void;
   showResult(result: GameResult): void;
   hideBanner(): void;
 }

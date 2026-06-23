@@ -24,6 +24,9 @@ export interface CollectResult {
   from: { x: number; y: number; z: number };
   /** Ids removed by a 3-of-a-kind match this pick (includes the added id); empty if no match. */
   clearedIds: number[];
+  /** The goal this pick advanced (its kind matched a goal and it wasn't already
+   * complete), with the new remaining count — null otherwise. */
+  goal: { index: number; remaining: number } | null;
 }
 
 interface SlotItem {
@@ -54,6 +57,11 @@ export class FactoryOperations {
   /** Logical slot contents, by unique item id. */
   private _slots: SlotItem[] = [];
   private _nextItemId = 1;
+  /** Seconds of physics simulation still owed; the world is stepped only while > 0
+   * so an idle pile freezes instead of jittering. */
+  private _settle = 0;
+  /** Remaining count per goal (parallel to config.goals), counted down on collect. */
+  private _goalRemaining: number[] = [];
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
 
   public inject(resolver: IInstanceResolver): void {
@@ -79,6 +87,8 @@ export class FactoryOperations {
     this._nextItemId = 1;
     this._model!.reset();
     this._timer!.reset();
+    this._settle = this._config!.physics.initialSettleSeconds; // let the drop settle, then freeze
+    this._goalRemaining = this._config!.goals.map((g) => g.target);
 
     this._buildBin();
     this._buildPile();
@@ -126,8 +136,8 @@ export class FactoryOperations {
           z: (Math.random() * 2 - 1) * cfg.spawn.areaHalf,
           type: "dynamic",
           mass: 1,
-          friction: 0.6,
-          restitution: 0.04,
+          // friction/restitution come from the world default contact material
+          // (FactoryMatchConfig.physics) so item↔item contacts honour them too.
           tag: kind,
         },
         this._makeView!(kind),
@@ -152,9 +162,18 @@ export class FactoryOperations {
     const from = { x: t.x, y: t.y, z: t.z };
     this._stage!.despawn(hit.body); // collider off — the shape leaves the simulation
     this._pile.delete(hit.body);
+    this._settle = cfg.physics.settleSeconds; // wake the pile so it resettles into the gap, then freeze
 
     const addedId = this._nextItemId++;
     this._slots.push({ id: addedId, kind });
+
+    // Count this collection against its goal (if any), once per single pickup.
+    let goal: { index: number; remaining: number } | null = null;
+    const goalIndex = cfg.goals.findIndex((g) => g.kind === kind);
+    if (goalIndex >= 0 && this._goalRemaining[goalIndex]! > 0) {
+      this._goalRemaining[goalIndex] -= 1;
+      goal = { index: goalIndex, remaining: this._goalRemaining[goalIndex]! };
+    }
 
     let clearedIds: number[] = [];
     const sameIds = this._slots.filter((s) => s.kind === kind).map((s) => s.id);
@@ -170,13 +189,19 @@ export class FactoryOperations {
     if (this._pile.size === 0) this._model!.setStatus("won");
     else if (this._slots.length >= cfg.slots.capacity) this._model!.setLost("tray");
 
-    return { addedId, kind, from, clearedIds };
+    return { addedId, kind, from, clearedIds, goal };
   }
 
   //  PER-FRAME / LIFECYCLE
 
+  /** True while the pile should be simulated; the app gates `physics.step` on it. */
+  public get physicsActive(): boolean {
+    return this._settle > 0;
+  }
+
   public update(dt: number): void {
     this._stage!.sync();
+    if (this._settle > 0) this._settle = Math.max(0, this._settle - dt); // burn down the physics-on window
     // Countdown only runs while playing; hitting zero ends the game.
     if (this._model!.status !== "playing") return;
     this._timer!.tick(dt);

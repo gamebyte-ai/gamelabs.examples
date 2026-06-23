@@ -9,6 +9,7 @@ import type { GameStatus } from "../models/IGameModel.js";
 export class GameEvents {
   private readonly _scoreChanged = new Set<(score: number) => void>();
   private readonly _statusChanged = new Set<(status: GameStatus) => void>();
+  private readonly _goalChanged = new Set<(index: number, remaining: number) => void>();
 
   public onScoreChanged(cb: (score: number) => void): Unsubscribe {
     this._scoreChanged.add(cb);
@@ -24,5 +25,13 @@ export class GameEvents {
   }
   public emitStatusChanged(status: GameStatus): void {
     for (const cb of this._statusChanged) cb(status);
+  }
+
+  public onGoalChanged(cb: (index: number, remaining: number) => void): Unsubscribe {
+    this._goalChanged.add(cb);
+    return () => this._goalChanged.delete(cb);
+  }
+  public emitGoalChanged(index: number, remaining: number): void {
+    for (const cb of this._goalChanged) cb(index, remaining);
   }
 }

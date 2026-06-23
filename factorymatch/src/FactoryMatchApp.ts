@@ -38,7 +38,14 @@ export class FactoryMatchApp extends GamelabsApp {
   }
 
   protected override registerModules(): void {
-    this.addModule(new Physics3DBinding({ gravity: { x: 0, y: -9.82, z: 0 } }));
+    const { gravity, friction, restitution } = this._config.physics;
+    this.addModule(
+      new Physics3DBinding({
+        gravity: { x: 0, y: gravity, z: 0 },
+        defaultFriction: friction,
+        defaultRestitution: restitution,
+      }),
+    );
   }
 
   protected override configureDI(): void {
@@ -87,9 +94,13 @@ export class FactoryMatchApp extends GamelabsApp {
       throw new Error("World or HUD is not initialized");
     }
 
-    // Step physics first each frame, before gameplay controllers.
+    // Step physics first each frame, before gameplay controllers — but only while
+    // FactoryOperations owes simulation time, so an idle pile freezes (no jitter).
     const physics = this.diContainer.getInstance(Physics3DManager);
-    this._physicsUnsub = this.diContainer.getInstance(UpdateManager).register((dt) => physics.step(dt), -1000);
+    const ops = this.diContainer.getInstance(FactoryOperations);
+    this._physicsUnsub = this.diContainer.getInstance(UpdateManager).register((dt) => {
+      if (ops.physicsActive) physics.step(dt);
+    }, -1000);
 
     // 3D game objects live in the World view; PileView resolves World for the camera + pick ray.
     this.viewDiContainer.bindInstance(World, this.world);

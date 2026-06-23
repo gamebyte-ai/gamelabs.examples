@@ -35,6 +35,13 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
     this._subs.add(this._events!.onScoreChanged((n) => view.setScore(n)));
     this._subs.add(this._events!.onStatusChanged((s) => this._applyStatus(s)));
     this._subs.add(this._timer!.onChange((elapsed) => this._renderTime(elapsed)));
+    this._subs.add(this._events!.onGoalChanged((i, remaining) => this._onGoalChanged(i, remaining)));
+  }
+
+  /** Update a goal's count and pop it to acknowledge the collection. */
+  private _onGoalChanged(index: number, remaining: number): void {
+    this._view!.setGoal(index, remaining);
+    this._view!.pulseGoal(index);
   }
 
   /** Format remaining time and push it to the HUD, skipping same-second redraws. */
@@ -49,7 +56,11 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
   private _applyStatus(status: GameStatus): void {
     if (status === "won") this._view!.showResult("allClear");
     else if (status === "lost") this._view!.showResult(this._model!.lostReason === "time" ? "timeUp" : "gameOver");
-    else this._view!.hideBanner();
+    else {
+      // Back to playing (initial or restart): clear the banner + reset goal counts.
+      this._view!.hideBanner();
+      this._config!.goals.forEach((goal, i) => this._view!.setGoal(i, goal.target));
+    }
   }
 
   public destroy(): void {
