@@ -11,7 +11,7 @@ import { GameModel } from "./models/GameModel";
 import { IGameModel } from "./models/IGameModel";
 import { GameEvents } from "./events/GameEvents";
 import { FactoryOperations } from "./utilities/FactoryOperations";
-import { ModelLibrary } from "./utilities/ModelLibrary";
+import { ModelLibraryService } from "./services/ModelLibraryService";
 
 export class FactoryMatchApp extends GamelabsApp {
   private readonly _config = new FactoryMatchConfig();
@@ -20,10 +20,7 @@ export class FactoryMatchApp extends GamelabsApp {
 
   /** `models` must already be loaded (see main.ts) — the PileView resolves it and
    * clones synchronously when the pile spawns. */
-  public constructor(
-    stageEl: HTMLElement,
-    private readonly _models: ModelLibrary,
-  ) {
+  public constructor(stageEl: HTMLElement, private readonly _models: ModelLibraryService) {
     super({ mount: stageEl });
   }
 
@@ -37,7 +34,7 @@ export class FactoryMatchApp extends GamelabsApp {
     this.viewDiContainer.bindInstance(FactoryMatchConfig, this._config);
 
     // Loaded model prototypes — resolved by PileView to clone pile/tray shapes.
-    this.viewDiContainer.bindInstance(ModelLibrary, this._models);
+    this.viewDiContainer.bindInstance(ModelLibraryService, this._models);
 
     this.diContainer.bindInstance(GameModel, new GameModel(), [IGameModel]);
     this.diContainer.bindInstance(GameEvents, new GameEvents());
@@ -72,5 +69,7 @@ export class FactoryMatchApp extends GamelabsApp {
     this._physicsUnsub = null;
     this._pileView?.destroy();
     this._pileView = null;
+    // Free the shared model GPU resources after the view (and its clones) are gone.
+    this._models.dispose();
   }
 }

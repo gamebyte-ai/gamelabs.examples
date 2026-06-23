@@ -21,22 +21,26 @@ const URLS: Record<Kind, string> = {
   gascan: gascanUrl,
 };
 
-/** Albedo (base-colour) texture per kind. Kinds without one fall back to a flat
- * colour tint (see load). Add more as their texture files land. */
+/** Albedo (base-colour) texture per kind. Kinds without one are tinted with their
+ * config colour instead (see load). Add more as their texture files land. */
 const TEXTURES: Partial<Record<Kind, string>> = {
   radio: radioTexUrl,
   billardball: billardTexUrl,
 };
 
-
 /**
- * Loads the FBX models once, normalises each (recentred + uniform-scaled to FIT,
- * own materials kept), and hands out cheap clones. Clones share geometry +
- * materials with the prototype, which are flagged `userData.shared` so the view's
- * disposer leaves them alone (see PileView._disposeObject). Falls back to a
- * colour-tinted box if a model fails to load, so the game still plays.
+ * External-boundary service: loads the FBX model files (+ their albedo textures)
+ * once, normalises each (recentred + uniform-scaled per config), and hands out
+ * cheap clones. Clones share geometry + materials with the prototype, flagged
+ * `userData.shared` so the view's per-clone disposer leaves them alone; the shared
+ * resources are released by `dispose()` at app teardown.
+ *
+ * Loading is all-or-nothing — a failed load rejects and propagates to the
+ * bootstrap caller (no fallback/limp-along), matching the project's
+ * initialization philosophy. The engine has no FBX `AssetType`, so this loads via
+ * three's `FBXLoader` directly rather than through `AssetManager`.
  */
-export class ModelLibrary {
+export class ModelLibraryService {
   private readonly _proto = new Map<Kind, THREE.Object3D>();
 
   public constructor(private readonly _config: FactoryMatchConfig) {}
@@ -47,23 +51,19 @@ export class ModelLibrary {
     const kinds = Object.keys(URLS) as Kind[];
     await Promise.all(
       kinds.map(async (kind) => {
-        try {
-          const fbx = await loader.loadAsync(URLS[kind]);
-          const proto = this._normalize(fbx, this._target(kind));
-          const texUrl = TEXTURES[kind];
-          if (texUrl) {
-            // Real albedo texture → show it true-colour (no tint).
-            const tex = await texLoader.loadAsync(texUrl);
-            tex.colorSpace = THREE.SRGBColorSpace;
-            this._applyTexture(proto, tex);
-          } else {
-            // No texture yet → tint with the config colour so kinds stay distinct.
-            this._tint(proto, this._config.kinds[kind].color);
-          }
-          this._proto.set(kind, proto);
-        } catch {
-          this._proto.set(kind, this._fallback(kind));
+        const fbx = await loader.loadAsync(URLS[kind]);
+        const proto = this._normalize(fbx, this._target(kind));
+        const texUrl = TEXTURES[kind];
+        if (texUrl) {
+          // Real albedo texture → show it true-colour (no tint).
+          const tex = await texLoader.loadAsync(texUrl);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          this._applyTexture(proto, tex);
+        } else {
+          // No texture yet → tint with the config colour so kinds stay distinct.
+          this._tint(proto, this._config.kinds[kind].color);
         }
+        this._proto.set(kind, proto);
       }),
     );
   }
@@ -71,7 +71,24 @@ export class ModelLibrary {
   /** A fresh clone of the loaded prototype (geometry + materials shared). */
   public make(kind: Kind): THREE.Object3D {
     const proto = this._proto.get(kind);
-    return proto ? proto.clone(true) : this._fallback(kind);
+    if (!proto) throw new Error(`ModelLibraryService: kind "${kind}" was not loaded`);
+    return proto.clone(true);
+  }
+
+  /** Release the shared prototype resources (geometry, materials, textures). The
+   * view skips these on per-clone dispose, so they must be freed here. */
+  public dispose(): void {
+    for (const proto of this._proto.values()) {
+      proto.traverse((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        o.geometry.dispose();
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          (m as THREE.MeshStandardMaterial).map?.dispose();
+          m.dispose();
+        }
+      });
+    }
+    this._proto.clear();
   }
 
   /** Per-kind target size: the shared `fit` baseline times this kind's `scale`. */
@@ -124,24 +141,13 @@ export class ModelLibrary {
     });
   }
 
-  /** Tag every mesh's geometry + materials so the disposer skips them — they are
-   * shared across all clones and the prototype. */
+  /** Tag every mesh's geometry + materials so the per-clone disposer skips them —
+   * they are shared across all clones and the prototype. */
   private _markShared(root: THREE.Object3D): void {
     root.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return;
       o.geometry.userData.shared = true;
       for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.userData.shared = true;
     });
-  }
-
-  /** A simple colour box used when a model can't be loaded. Not shared — the
-   * disposer is free to release it. */
-  private _fallback(kind: Kind): THREE.Object3D {
-    const c = this._config.kinds[kind].color;
-    const s = this._target(kind);
-    return new THREE.Mesh(
-      new THREE.BoxGeometry(s, s, s),
-      new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, metalness: 0.12 }),
-    );
   }
 }

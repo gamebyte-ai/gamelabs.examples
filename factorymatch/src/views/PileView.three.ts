@@ -4,7 +4,7 @@ import { WorldViewBase, World, type IInstanceResolver, type Unsubscribe } from "
 import type { Physics3DEntityView } from "@gamebyte/gamelabsjs/physics3d";
 import type { IPileView } from "./IPileView.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
-import { ModelLibrary } from "../utilities/ModelLibrary.js";
+import { ModelLibraryService } from "../services/ModelLibraryService.js";
 import type { CollectResult } from "../utilities/FactoryOperations.js";
 import type { Kind } from "../models/IGameModel.js";
 
@@ -24,7 +24,7 @@ interface SlotMesh {
 export class PileView extends WorldViewBase implements IPileView {
   private _config: FactoryMatchConfig | null = null;
   private _world: World | null = null;
-  private _models: ModelLibrary | null = null;
+  private _models: ModelLibraryService | null = null;
   private _prevFog: THREE.Scene["fog"] = null;
   /** Orthographic (isometric) camera; created + made active when config opts in. */
   private _ortho: THREE.OrthographicCamera | null = null;
@@ -59,7 +59,7 @@ export class PileView extends WorldViewBase implements IPileView {
     super.inject(resolver);
     this._config = resolver.getInstance(FactoryMatchConfig);
     this._world = resolver.getInstance(World);
-    this._models = resolver.getInstance(ModelLibrary);
+    this._models = resolver.getInstance(ModelLibraryService);
   }
 
   public override postInitialize(): void {

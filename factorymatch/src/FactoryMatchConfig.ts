@@ -1,9 +1,9 @@
 import { SCREEN_TRANSITION_TYPES, type ScreenTransition } from "@gamebyte/gamelabsjs";
 import type { Kind } from "./models/IGameModel.js";
 
-/** Per-kind (box) collider full-extents + a fallback colour used only if the 3D
- * model fails to load. Colliders are box approximations — the distinct models
- * give the gameplay-relevant difference. */
+/** Per-kind (box) collider full-extents + a tint colour applied to kinds that
+ * have no albedo texture yet (textured kinds ignore it). Colliders are box
+ * approximations — the distinct models give the gameplay-relevant difference. */
 export interface KindDef {
   color: number;
   collider: { width: number; height: number; depth: number };

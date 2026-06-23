@@ -3,14 +3,15 @@ import "@pixi/layout";
 
 import { FactoryMatchApp } from "./FactoryMatchApp";
 import { FactoryMatchConfig } from "./FactoryMatchConfig";
-import { ModelLibrary } from "./utilities/ModelLibrary";
+import { ModelLibraryService } from "./services/ModelLibraryService";
 
 async function start(): Promise<void> {
   const stage = document.getElementById("stage");
   if (!stage) throw new Error("Missing #stage element");
 
-  // Load the 3D models up front so the pile can spawn them synchronously.
-  const models = new ModelLibrary(new FactoryMatchConfig());
+  // Load the 3D models up front so the pile can spawn them synchronously. A
+  // failed load rejects here and is surfaced by start().catch — no partial run.
+  const models = new ModelLibraryService(new FactoryMatchConfig());
   await models.load();
 
   const app = new FactoryMatchApp(stage, models);
