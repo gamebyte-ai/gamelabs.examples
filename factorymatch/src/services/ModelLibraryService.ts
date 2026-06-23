@@ -11,7 +11,8 @@ import radioUrl from "../../assets/SM_Radio_01.fbx?url";
 import gascanUrl from "../../assets/SM_GasCan_01.fbx?url";
 
 import radioTexUrl from "../../assets/SM_Radio_01_Turquoise_Albedo.png?url";
-import billardTexUrl from "../../assets/BillardBall_8.png?url";
+import billardTexUrl from "../../assets/SM_BillardBalls_Colors_01.png?url";
+import diceTexUrl from "../../assets/SM_Toy_Dice_01_Purple_Albedo.png?url";
 
 const URLS: Record<Kind, string> = {
   dice: diceUrl,
@@ -26,6 +27,7 @@ const URLS: Record<Kind, string> = {
 const TEXTURES: Partial<Record<Kind, string>> = {
   radio: radioTexUrl,
   billardball: billardTexUrl,
+  dice: diceTexUrl,
 };
 
 /**
@@ -52,7 +54,7 @@ export class ModelLibraryService {
     await Promise.all(
       kinds.map(async (kind) => {
         const fbx = await loader.loadAsync(URLS[kind]);
-        const proto = this._normalize(fbx, this._target(kind));
+        const proto = this._normalize(fbx, kind);
         const texUrl = TEXTURES[kind];
         if (texUrl) {
           // Real albedo texture → show it true-colour (no tint).
@@ -91,24 +93,28 @@ export class ModelLibraryService {
     this._proto.clear();
   }
 
-  /** Per-kind target size: the shared `fit` baseline times this kind's `scale`. */
+  /** Per-kind target size (largest world-space extent) the model is scaled to. */
   private _target(kind: Kind): number {
-    return this._config.models.fit * this._config.models.scale[kind];
+    return this._config.models.size[kind];
   }
 
-  /** Recentre on the bounding-box centre and uniform-scale so the largest extent
-   * equals `target`. The fit-scale lives on an inner group; the returned outer
-   * group keeps scale 1 so gameplay tweens can drive its scale without fighting it. */
-  private _normalize(src: THREE.Object3D, target: number): THREE.Object3D {
+  /** Recentre on the bounding-box centre, uniform-scale so the largest extent
+   * equals `target`, and apply the base orientation fix (degrees). The fit-scale
+   * + base rotation live on an inner group; the returned outer group keeps an
+   * identity transform so gameplay tweens drive its scale/rotation without
+   * fighting them. */
+  private _normalize(src: THREE.Object3D, kind: Kind): THREE.Object3D {
     const box = new THREE.Box3().setFromObject(src);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
-    const fit = target / (Math.max(size.x, size.y, size.z) || 1);
+    const fit = this._target(kind) / (Math.max(size.x, size.y, size.z) || 1);
+    const rot = this._config.models.rotation[kind];
 
     src.position.sub(center); // bbox centre → origin (in the model's own units)
     const inner = new THREE.Group();
     inner.add(src);
     inner.scale.setScalar(fit);
+    inner.rotation.set(THREE.MathUtils.degToRad(rot.x), THREE.MathUtils.degToRad(rot.y), THREE.MathUtils.degToRad(rot.z));
 
     const outer = new THREE.Group();
     outer.add(inner);

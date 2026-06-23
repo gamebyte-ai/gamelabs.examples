@@ -66,17 +66,26 @@ export class FactoryMatchConfig {
     gascan: { color: 0xd23b2e, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
   };
 
-  /** 3D model display sizing. Each model is uniformly scaled so its largest
-   * extent equals `fit` × its per-kind `scale` (world units). `fit` sets the
-   * shared baseline; bump a single `scale` entry to make just that model bigger
-   * or smaller. Visual only — does not change the collider. */
-  public readonly models: { fit: number; scale: Record<Kind, number> } = {
-    fit: 0.55,
-    scale: { dice: 1, billardball: 1, guitar: 1, radio: 1, gascan: 1 },
+  /** Per-kind display tuning. `size` = largest world-space extent each model is
+   * uniformly scaled to (independent per kind). `rotation` = a base orientation
+   * fix (degrees) baked into the model so it sits upright/forward on the tray;
+   * the rack tilt is applied on top of this. Visual only — not the collider. */
+  public readonly models: {
+    size: Record<Kind, number>;
+    rotation: Record<Kind, { x: number; y: number; z: number }>;
+  } = {
+    size: { dice: 0.35, billardball: 0.4, guitar: 1, radio: 0.6, gascan: 0.6 },
+    rotation: {
+      dice: { x: 0, y: 0, z: 0 },
+      billardball: { x: 0, y: 0, z: 0 },
+      guitar: { x: -90, y: 0, z: 0 },
+      radio: { x: 180, y: 0, z: 0 },
+      gascan: { x: 0, y: 0, z: 0 },
+    },
   };
 
   /** How many of each kind to drop into the bin (multiples of matchCount → fully clearable). */
-  public readonly spawnPerKind = 6;
+  public readonly spawnPerKind = 9;
   /** Horizontal jitter + vertical stagger for the initial drop. */
   public readonly spawn = { areaHalf: 1.0, baseY: 1.3, stepY: 0.5 };
 
