@@ -138,6 +138,14 @@ export class FactoryOperations {
     const kind = this._pile.get(hit.body);
     if (kind === undefined) return null; // hit the bin, not a shape
 
+    const cfg = this._config!;
+    // Full tray: the pick is rejected and the game ends — no exception, even if
+    // this kind would complete a match. The shape stays in the pile (not despawned).
+    if (this._slots.length >= cfg.slots.capacity) {
+      this._model!.setStatus("lost");
+      return null;
+    }
+
     const t = this._physics!.getTransform(hit.body, this._t);
     const from = { x: t.x, y: t.y, z: t.z };
     this._stage!.despawn(hit.body); // collider off — the shape leaves the simulation
@@ -147,7 +155,6 @@ export class FactoryOperations {
     this._slots.push({ id: addedId, kind });
 
     let clearedIds: number[] = [];
-    const cfg = this._config!;
     const sameIds = this._slots.filter((s) => s.kind === kind).map((s) => s.id);
     if (sameIds.length >= cfg.slots.matchCount) {
       clearedIds = sameIds.slice(-cfg.slots.matchCount);
@@ -157,7 +164,6 @@ export class FactoryOperations {
     }
 
     if (this._pile.size === 0) this._model!.setStatus("won");
-    else if (this._slots.length > cfg.slots.capacity) this._model!.setStatus("lost");
 
     return { addedId, kind, from, clearedIds };
   }

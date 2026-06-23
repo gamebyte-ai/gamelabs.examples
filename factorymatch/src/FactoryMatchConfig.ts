@@ -24,11 +24,38 @@ export class FactoryMatchConfig {
   };
 
   /** 3D slot rack in front of the bin where collected shapes fly to and line up.
-   * `itemScale` shrinks a collected shape to a quarter of its pile size. */
-  public readonly rack = { z: 2.35, y: 0.32, spacing: 0.46, itemScale: 0.25, padColor: 0x222831 };
+   * `itemScale` is the collected shape's size relative to its pile size.
+   * `itemRotationY` (degrees) gives the seated shape a slight diagonal turn.
+   * `tiltX` (degrees) is the shared X-tilt (pitch toward the camera) applied to
+   * BOTH the pads and the seated items, so an item always sits flush on its pad. */
+  public readonly rack = {
+    z: 2.35,
+    y: 0.32,
+    spacing: 0.76,
+    itemScale: 0.42,
+    itemRotationY: 25,
+    tiltX: -40,
+    itemLift: 0.15, // raises the seated item so its base rests on the pad (anchor is its center, not its base)
+    arcLift: 1.5, // collected item hops this high (world units) above its start/end before landing in the tray
+    shiftHop: 0.35, // how high a seated item hops while sliding to a new slot on reorder (world units)
+    suspensionDip: 0.5, // how far the pad + landed item sink on impact before springing back (world units)
+    matchLift: 0.6, // how high a matched shape rises off the rack before collapsing (world units)
+    matchGrow: 1.5, // peak scale of a matched shape during the rise, as a multiple of itemScale
+    padWidth: 0.62, // pad size in x (world units) — keep ≤ spacing to avoid neighbours touching
+    padDepth: 0.34, // pad size in z (world units)
+    padColor: 0x222831,
+  };
 
-  /** Animation durations (seconds). */
-  public readonly anim = { fly: 0.45, slide: 0.28, pop: 0.24 };
+  /** Animation durations (seconds). `matchRise`/`matchCollapse` are the two
+   * phases of a clear: rise+grow, then converge on the group centre while
+   * shrinking to nothing. */ 
+  public readonly anim = {
+    fly: 0.45,
+    slide: 0.28,
+    trayDrop: 0.25, // how long the tray's fall takes — AND, symmetrically, its rise back (seconds); both block + tray reach the lowest point at the same instant. SMALLER = tray starts later and falls faster; LARGER = starts earlier and falls slower (if it exceeds `fly`, the whole flight stretches to match).
+    matchRise: 0.2,
+    matchCollapse: 0.32,
+  };
 
   public readonly kinds: Record<Kind, KindDef> = {
     cube: { color: 0x49c95a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
@@ -45,11 +72,23 @@ export class FactoryMatchConfig {
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
   public readonly slots = { capacity: 7, matchCount: 3, matchPoints: 10 };
 
-  /** Fixed 3D camera looking down into the bin. */
+  /** Fixed 3D camera looking down into the bin.
+   * `orthographic` swaps the perspective camera for an isometric-style parallel
+   * projection (no perspective convergence). `frustumHeight` is the vertical
+   * world-space extent the camera shows — smaller = more zoomed in. Width is
+   * derived from the viewport aspect, so portrait framing stays consistent. */
   public readonly camera = {
-    position: { x: 0, y: 3.6, z: 4.4 },
-    lookAt: { x: 0, y: 0.35, z: 0 },
+    position: { x: 0, y: 6.6, z: 1.4 },
+    lookAt: { x: 0, y: 0.35, z: 0.2 },
+    orthographic: true,
+    frustumHeight: 7.2,
   };
+
+  /** Selection silhouette shown while a pile shape is hovered (mouse) or pressed
+   * (touch). Rendered as an inverted hull: a back-faces-only copy enlarged by
+   * `scale`, so only the outer screen contour shows. `scale` sets rim thickness
+   * (1.04 = 4% larger than the shape). */
+  public readonly outline = { color: 0xffffff, scale: 1.04 };
 
   public readonly transitions: { gameScreenEnter: ScreenTransition } = {
     gameScreenEnter: { type: SCREEN_TRANSITION_TYPES.INSTANT, durationMs: 0 },
