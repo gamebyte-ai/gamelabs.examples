@@ -4,15 +4,15 @@ import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import type { FactoryMatchConfig } from "../FactoryMatchConfig.js";
 import type { Kind } from "../models/IGameModel.js";
 
-import diceUrl from "../../assets/SM_Toy_Dice_01.fbx?url";
-import billardUrl from "../../assets/BillardBall_8.fbx?url";
-import guitarUrl from "../../assets/SM_Guitar_01.fbx?url";
-import radioUrl from "../../assets/SM_Radio_01.fbx?url";
-import gascanUrl from "../../assets/SM_GasCan_01.fbx?url";
+import diceUrl from "../../assets/models/SM_Toy_Dice_01.fbx?url";
+import billardUrl from "../../assets/models/BillardBall_8.fbx?url";
+import guitarUrl from "../../assets/models/SM_Guitar_01.fbx?url";
+import radioUrl from "../../assets/models/SM_Radio_01.fbx?url";
+import gascanUrl from "../../assets/models/SM_GasCan_01.fbx?url";
 
-import radioTexUrl from "../../assets/SM_Radio_01_Turquoise_Albedo.png?url";
-import billardTexUrl from "../../assets/SM_BillardBalls_Colors_01.png?url";
-import diceTexUrl from "../../assets/SM_Toy_Dice_01_Purple_Albedo.png?url";
+import radioTexUrl from "../../assets/textures/SM_Radio_01_Turquoise_Albedo.png?url";
+import billardTexUrl from "../../assets/textures/SM_BillardBalls_Colors_01.png?url";
+import diceTexUrl from "../../assets/textures/SM_Toy_Dice_01_Purple_Albedo.png?url";
 
 const URLS: Record<Kind, string> = {
   dice: diceUrl,

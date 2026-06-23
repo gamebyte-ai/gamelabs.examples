@@ -88,15 +88,19 @@ export class FactoryOperations {
   private _buildBin(): void {
     const { bin } = this._config!;
     const t = bin.wallThickness;
-    const span = bin.innerHalf * 2 + t * 2;
+    const spanX = bin.halfWidth * 2 + t * 2;
+    const spanZ = bin.halfDepth * 2 + t * 2;
     const ch = bin.wallColliderHeight;
     const wy = bin.floorY + ch / 2;
-    const edge = bin.innerHalf + t / 2;
+    const edgeX = bin.halfWidth + t / 2;
+    const edgeZ = bin.halfDepth + t / 2;
 
-    this._binIds.push(this._physics!.createBody(this._static(span, 0.2, span, 0, bin.floorY - 0.1, 0)));
-    for (const sx of [-1, 1]) this._binIds.push(this._physics!.createBody(this._static(t, ch, span, sx * edge, wy, 0)));
+    this._binIds.push(this._physics!.createBody(this._static(spanX, 0.2, spanZ, 0, bin.floorY - 0.1, 0)));
+    for (const sx of [-1, 1]) {
+      this._binIds.push(this._physics!.createBody(this._static(t, ch, spanZ, sx * edgeX, wy, 0)));
+    }
     for (const sz of [-1, 1]) {
-      this._binIds.push(this._physics!.createBody(this._static(bin.innerHalf * 2, ch, t, 0, wy, sz * edge)));
+      this._binIds.push(this._physics!.createBody(this._static(bin.halfWidth * 2, ch, t, 0, wy, sz * edgeZ)));
     }
   }
 

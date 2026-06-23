@@ -19,7 +19,8 @@ export class FactoryMatchConfig {
   /** Static bin the shapes pile up in. `transparent` hides the floor + glass
    * walls so the pile floats on the background (the colliders are unaffected). */
   public readonly bin = {
-    innerHalf: 1.4, // play area half-extent in x and z
+    halfWidth: 1.4, // play-area half-extent in x (pool width = halfWidth * 2)
+    halfDepth: 1.4, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
     wallHeight: 1.0, // visible glass-wall height
@@ -49,9 +50,9 @@ export class FactoryMatchConfig {
     // Tray sizing (world units). Slot pitch = padWidth + gap; the full row spans
     // (capacity-1)*(padWidth+gap) + padWidth, which must fit the portrait width
     // (ortho width ≈ frustumHeight * viewport-aspect, ~3.3–4.0 in portrait).
-    padWidth: 0.42, // block width in x
+    padWidth: 0.39, // block width in x
     gap: 0.06, // empty space between adjacent blocks
-    padDepth: 0.34, // pad size in z (world units)
+    padDepth: 0.4, // pad size in z (world units)
     padColor: 0x222831,
   };
 
@@ -95,7 +96,7 @@ export class FactoryMatchConfig {
   /** How many of each kind to drop into the bin (multiples of matchCount → fully clearable). */
   public readonly spawnPerKind = 12;
   /** Horizontal jitter + vertical stagger for the initial drop. */
-  public readonly spawn = { areaHalf: 1.0, baseY: 1.3, stepY: 0.5 };
+  public readonly spawn = { areaHalf: 1.0, baseY: 1.3, stepY: 0.45 };
 
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
   public readonly slots = { capacity: 7, matchCount: 3, matchPoints: 10 };
@@ -112,6 +113,12 @@ export class FactoryMatchConfig {
     { kind: "radio", target: 14 },
     { kind: "billardball", target: 15 },
   ];
+
+  /** HUD layout (screen pixels). `topY` is the timer + score row centre; `goalsY`
+   * is the goal chips' row centre (both from the top of the screen). `goalFontSize`
+   * sizes the goal count text; `goalTextY` offsets that text from the chip centre
+   * (positive = down). */
+  public readonly hud = { topY: 62, goalsY: 142, goalFontSize: 15, goalTextY: 24 };
 
   /** Fixed 3D camera looking down into the bin.
    * `orthographic` swaps the perspective camera for an isometric-style parallel

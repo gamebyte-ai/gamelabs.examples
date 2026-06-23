@@ -509,12 +509,14 @@ export class PileView extends WorldViewBase implements IPileView {
     const { bin } = this._config!;
     if (bin.transparent) return; // pile floats on the background; colliders live in FactoryOperations
     const t = bin.wallThickness;
-    const span = bin.innerHalf * 2 + t * 2;
-    const edge = bin.innerHalf + t / 2;
+    const spanX = bin.halfWidth * 2 + t * 2;
+    const spanZ = bin.halfDepth * 2 + t * 2;
+    const edgeX = bin.halfWidth + t / 2;
+    const edgeZ = bin.halfDepth + t / 2;
     const wy = bin.floorY + bin.wallHeight / 2;
 
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(span, 0.2, span),
+      new THREE.BoxGeometry(spanX, 0.2, spanZ),
       new THREE.MeshStandardMaterial({ color: bin.floorColor, roughness: 0.85, metalness: 0.05 }),
     );
     floor.position.set(0, bin.floorY - 0.1, 0);
@@ -523,13 +525,13 @@ export class PileView extends WorldViewBase implements IPileView {
     const glass = (): THREE.MeshStandardMaterial =>
       new THREE.MeshStandardMaterial({ color: bin.wallColor, transparent: true, opacity: 0.22, roughness: 0.6 });
     for (const sx of [-1, 1]) {
-      const w = new THREE.Mesh(new THREE.BoxGeometry(t, bin.wallHeight, span), glass());
-      w.position.set(sx * edge, wy, 0);
+      const w = new THREE.Mesh(new THREE.BoxGeometry(t, bin.wallHeight, spanZ), glass());
+      w.position.set(sx * edgeX, wy, 0);
       this._bin.add(w);
     }
     for (const sz of [-1, 1]) {
-      const w = new THREE.Mesh(new THREE.BoxGeometry(bin.innerHalf * 2, bin.wallHeight, t), glass());
-      w.position.set(0, wy, sz * edge);
+      const w = new THREE.Mesh(new THREE.BoxGeometry(bin.halfWidth * 2, bin.wallHeight, t), glass());
+      w.position.set(0, wy, sz * edgeZ);
       this._bin.add(w);
     }
   }

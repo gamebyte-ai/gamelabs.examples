@@ -64,7 +64,7 @@ export class FactoryMatchApp extends GamelabsApp {
     // HUD textures load through the AssetManager pipeline; the screen view
     // resolves them by id with `assetLoader.getAsset` once they're ready.
     const add = (id: FactoryMatchAssetIds, fileName: string): void => {
-      const url = new URL(`../assets/${fileName}`, import.meta.url).href;
+      const url = new URL(`../assets/ui/${fileName}`, import.meta.url).href;
       this._assetRequestList.addRequest(new AssetRequest(AssetTypes.HudTexture, id, url));
     };
     add(FactoryMatchAssetIds.TimerBg, "UI_Timer_BG_01.png");
@@ -73,6 +73,11 @@ export class FactoryMatchApp extends GamelabsApp {
     add(FactoryMatchAssetIds.ResultAllClear, "FBT_TM3D_AllClear.png");
     add(FactoryMatchAssetIds.ResultTimeIsUp, "FBT_TM3D_TimeIsUp.png");
     add(FactoryMatchAssetIds.ResultGameOver, "FBT_TM3D_GameOver.png");
+    add(FactoryMatchAssetIds.GoalIconDice, "Toy_Dice_Purple.png");
+    add(FactoryMatchAssetIds.GoalIconRadio, "Radio_Turqoise.png");
+    add(FactoryMatchAssetIds.GoalIconBillard, "BillardBall_8.png");
+    add(FactoryMatchAssetIds.BoosterFan, "UI_Booster_Fan_Passive_01.png");
+    add(FactoryMatchAssetIds.BoosterSpring, "UI_Booster_Spring_Passive_01.png");
     this.assetManager.loadAll(this._assetRequestList.getRequests());
   }
 

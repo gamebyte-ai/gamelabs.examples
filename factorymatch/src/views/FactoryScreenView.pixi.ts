@@ -3,17 +3,21 @@ import { ScreenView, type IInstanceResolver } from "@gamebyte/gamelabsjs";
 
 import type { GameResult, IFactoryScreenView } from "./IFactoryScreenView.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
-import { FactoryMatchAssetIds } from "../FactoryMatchAssetIds.js";
+import { FactoryMatchAssetIds, GOAL_ICON_BY_KIND } from "../FactoryMatchAssetIds.js";
 
 // HUD layout (screen pixels). Tuned for portrait; row positions are fractions of
 // the viewport so they hold across sizes. Tweak here to nudge the layout.
-const TOP_Y = 62; // baseline y for the timer/score pills
-const CAPTION_DY = 35; // caption sits this far above its pill centre
-const ROW2_Y = 132; // baseline y for the multiplier + goals row
+const CAPTION_DY = 35; // caption sits this far above its pill centre (row y is config.hud.topY)
+const MULT_Y = 132; // multiplier badge centre y (goal row y is config.hud.goalsY)
 const PILL_H = 46; // on-screen height of the timer + score pills
 const GOAL_H = 88; // on-screen height of each goal chip
 const MULT_H = 62; // on-screen height of the multiplier circle
 const GOAL_GAP = 10; // px between goal chips
+const PILL_GAP = 14; // px between the timer + score pills (they stay centred as a pair)
+const MULT_X = 54; // multiplier badge centre, fixed px from the left edge
+const BOOSTER_H = 76; // on-screen height of each bottom booster button
+const BOOSTER_GAP = 56; // px between the two booster buttons
+const BOOSTER_BOTTOM = 72; // booster row centre, fixed px up from the bottom edge
 const BANNER_WIDTH_FRACTION = 0.82; // end banner width relative to the viewport
 
 const RESULT_ASSET: Record<GameResult, FactoryMatchAssetIds> = {
@@ -41,6 +45,8 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _multiplierValue = this._makeText(20, 0xe8eef6, "800");
   private readonly _goals: PIXI.Container[] = [];
   private readonly _goalValues: PIXI.Text[] = [];
+  private readonly _boosterFan = new PIXI.Sprite();
+  private readonly _boosterSpring = new PIXI.Sprite();
 
   private readonly _banner = new PIXI.Sprite();
   private _w = 1;
@@ -69,15 +75,28 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
 
     for (const goal of this._config!.goals) {
       const chip = new PIXI.Container();
-      const value = this._makeText(18, 0xe8eef6, "800");
+      const value = this._makeText(this._config!.hud.goalFontSize, 0xe8eef6, "800");
       this._buildBadge(chip, value, FactoryMatchAssetIds.GoalBg, GOAL_H);
+      // Item icon fills the upper-centre; the count sits near the bottom.
+      const iconId = GOAL_ICON_BY_KIND[goal.kind];
+      const iconTex = iconId ? this.assetLoader.getAsset<PIXI.Texture>(iconId) : undefined;
+      if (iconTex) {
+        const icon = new PIXI.Sprite(iconTex);
+        icon.anchor.set(0.5);
+        icon.scale.set((GOAL_H * 0.52) / iconTex.height);
+        icon.position.set(0, -GOAL_H * 0.08);
+        chip.addChild(icon);
+      }
       value.text = String(goal.target);
-      // Count sits near the bottom of the chip (item art will fill the centre later).
-      value.position.set(0, GOAL_H * 0.3);
+      value.position.set(0, this._config!.hud.goalTextY);
       this._goals.push(chip);
       this._goalValues.push(value);
       this.addChild(chip);
     }
+
+    this._initBooster(this._boosterFan, FactoryMatchAssetIds.BoosterFan);
+    this._initBooster(this._boosterSpring, FactoryMatchAssetIds.BoosterSpring);
+    this.addChild(this._boosterFan, this._boosterSpring);
 
     this._banner.anchor.set(0.5);
     this._banner.visible = false;
@@ -117,13 +136,26 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._w = Math.max(1, width);
     this._h = Math.max(1, height);
 
-    this._timer.position.set(this._w * 0.29, TOP_Y);
-    this._timerCaption.position.set(this._w * 0.29, TOP_Y - CAPTION_DY);
-    this._score.position.set(this._w * 0.71, TOP_Y);
-    this._scoreCaption.position.set(this._w * 0.71, TOP_Y - CAPTION_DY);
+    // Timer + score stay centred as a pair near the top, a fixed gap apart —
+    // tied to the top of the screen, not scaled by the viewport width.
+    const cx = this._w / 2;
+    const topY = this._config!.hud.topY;
+    const pillHalf = (this._timer.width + PILL_GAP) / 2;
+    const timerX = cx - pillHalf;
+    const scoreX = cx + pillHalf;
+    this._timer.position.set(timerX, topY);
+    this._timerCaption.position.set(timerX, topY - CAPTION_DY);
+    this._score.position.set(scoreX, topY);
+    this._scoreCaption.position.set(scoreX, topY - CAPTION_DY);
 
-    this._multiplier.position.set(this._w * 0.13, ROW2_Y);
+    this._multiplier.position.set(MULT_X, MULT_Y);
     this._layoutGoals();
+
+    // Two booster buttons centred as a pair near the bottom edge.
+    const boosterY = this._h - BOOSTER_BOTTOM;
+    const boosterHalf = (this._boosterFan.width + BOOSTER_GAP) / 2;
+    this._boosterFan.position.set(cx - boosterHalf, boosterY);
+    this._boosterSpring.position.set(cx + boosterHalf, boosterY);
 
     if (this._banner.visible) this._layoutBanner();
   }
@@ -133,9 +165,10 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     if (this._goals.length === 0) return;
     const chipW = this._goals[0]!.width;
     const step = chipW + GOAL_GAP;
-    const centreX = this._w * 0.6;
+    const centreX = this._w / 2; // goals centred on the screen's x axis
     const startX = centreX - (step * (this._goals.length - 1)) / 2;
-    this._goals.forEach((chip, i) => chip.position.set(startX + i * step, ROW2_Y));
+    const y = this._config!.hud.goalsY;
+    this._goals.forEach((chip, i) => chip.position.set(startX + i * step, y));
   }
 
   /** Scale the end banner to a fraction of the viewport width and centre it. */
@@ -144,6 +177,15 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     const scale = (this._w * BANNER_WIDTH_FRACTION) / this._banner.texture.width;
     this._banner.scale.set(scale);
     this._banner.position.set(this._w / 2, this._h * 0.42);
+  }
+
+  /** Texture + centre-anchor + height-scale a booster sprite from its asset. */
+  private _initBooster(sprite: PIXI.Sprite, id: FactoryMatchAssetIds): void {
+    const texture = this.assetLoader.getAsset<PIXI.Texture>(id);
+    if (!texture) return;
+    sprite.texture = texture;
+    sprite.anchor.set(0.5);
+    sprite.scale.set(BOOSTER_H / texture.height);
   }
 
   /** Build a centred bg sprite (scaled to `targetH`) with a centred value label. */
