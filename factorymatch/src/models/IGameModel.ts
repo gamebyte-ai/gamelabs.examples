@@ -1,7 +1,7 @@
 import { InjectionToken } from "@gamebyte/gamelabsjs";
 
-/** Matchable shape kinds. */
-export type Kind = "cube" | "cylinder" | "plus" | "triprism";
+/** Matchable object kinds — one per imported 3D model. */
+export type Kind = "dice" | "billardball" | "guitar" | "radio" | "gascan";
 
 export type GameStatus = "playing" | "won" | "lost";
 

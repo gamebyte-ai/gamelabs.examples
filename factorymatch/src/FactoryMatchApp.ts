@@ -11,13 +11,19 @@ import { GameModel } from "./models/GameModel";
 import { IGameModel } from "./models/IGameModel";
 import { GameEvents } from "./events/GameEvents";
 import { FactoryOperations } from "./utilities/FactoryOperations";
+import { ModelLibrary } from "./utilities/ModelLibrary";
 
 export class FactoryMatchApp extends GamelabsApp {
   private readonly _config = new FactoryMatchConfig();
   private _physicsUnsub: Unsubscribe | null = null;
   private _pileView: PileView | null = null;
 
-  public constructor(stageEl: HTMLElement) {
+  /** `models` must already be loaded (see main.ts) — the PileView resolves it and
+   * clones synchronously when the pile spawns. */
+  public constructor(
+    stageEl: HTMLElement,
+    private readonly _models: ModelLibrary,
+  ) {
     super({ mount: stageEl });
   }
 
@@ -29,6 +35,9 @@ export class FactoryMatchApp extends GamelabsApp {
     // Config is needed by views (viewDiContainer) and by controllers/operations (diContainer).
     this.diContainer.bindInstance(FactoryMatchConfig, this._config);
     this.viewDiContainer.bindInstance(FactoryMatchConfig, this._config);
+
+    // Loaded model prototypes — resolved by PileView to clone pile/tray shapes.
+    this.viewDiContainer.bindInstance(ModelLibrary, this._models);
 
     this.diContainer.bindInstance(GameModel, new GameModel(), [IGameModel]);
     this.diContainer.bindInstance(GameEvents, new GameEvents());

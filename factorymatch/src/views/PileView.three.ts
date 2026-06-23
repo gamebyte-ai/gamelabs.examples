@@ -4,6 +4,7 @@ import { WorldViewBase, World, type IInstanceResolver, type Unsubscribe } from "
 import type { Physics3DEntityView } from "@gamebyte/gamelabsjs/physics3d";
 import type { IPileView } from "./IPileView.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
+import { ModelLibrary } from "../utilities/ModelLibrary.js";
 import type { CollectResult } from "../utilities/FactoryOperations.js";
 import type { Kind } from "../models/IGameModel.js";
 
@@ -23,6 +24,7 @@ interface SlotMesh {
 export class PileView extends WorldViewBase implements IPileView {
   private _config: FactoryMatchConfig | null = null;
   private _world: World | null = null;
+  private _models: ModelLibrary | null = null;
   private _prevFog: THREE.Scene["fog"] = null;
   /** Orthographic (isometric) camera; created + made active when config opts in. */
   private _ortho: THREE.OrthographicCamera | null = null;
@@ -57,6 +59,7 @@ export class PileView extends WorldViewBase implements IPileView {
     super.inject(resolver);
     this._config = resolver.getInstance(FactoryMatchConfig);
     this._world = resolver.getInstance(World);
+    this._models = resolver.getInstance(ModelLibrary);
   }
 
   public override postInitialize(): void {
@@ -478,28 +481,7 @@ export class PileView extends WorldViewBase implements IPileView {
   //  MESHES
 
   private _makeShape(kind: Kind): THREE.Object3D {
-    const color = this._config!.kinds[kind].color;
-    switch (kind) {
-      case "cube":
-        return this._mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), color);
-      case "cylinder":
-        return this._mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.5, 24), color);
-      case "triprism": {
-        const m = this._mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.5, 3), color);
-        m.rotation.y = Math.PI / 2;
-        return m;
-      }
-      case "plus": {
-        const group = new THREE.Group();
-        group.add(this._mesh(new THREE.BoxGeometry(0.62, 0.5, 0.22), color));
-        group.add(this._mesh(new THREE.BoxGeometry(0.22, 0.5, 0.62), color));
-        return group;
-      }
-    }
-  }
-
-  private _mesh(geometry: THREE.BufferGeometry, color: number): THREE.Mesh {
-    return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.12 }));
+    return this._models!.make(kind);
   }
 
   /** Visible slot pads so the rack reads even when empty. */
@@ -550,9 +532,12 @@ export class PileView extends WorldViewBase implements IPileView {
   private static _disposeObject(obj: THREE.Object3D): void {
     obj.removeFromParent();
     obj.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
-        o.geometry.dispose();
-        (o.material as THREE.Material).dispose();
+      if (!(o instanceof THREE.Mesh)) return;
+      // Model clones share geometry + materials with the library prototype
+      // (flagged `userData.shared`); only release resources we actually own.
+      if (!o.geometry.userData.shared) o.geometry.dispose();
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m.userData.shared) m.dispose();
       }
     });
   }

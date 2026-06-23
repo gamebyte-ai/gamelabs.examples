@@ -1,8 +1,9 @@
 import { SCREEN_TRANSITION_TYPES, type ScreenTransition } from "@gamebyte/gamelabsjs";
 import type { Kind } from "./models/IGameModel.js";
 
-/** Per-kind appearance + (box) collider full-extents. Colliders are box
- * approximations — distinct meshes give the gameplay-relevant difference. */
+/** Per-kind (box) collider full-extents + a fallback colour used only if the 3D
+ * model fails to load. Colliders are box approximations — the distinct models
+ * give the gameplay-relevant difference. */
 export interface KindDef {
   color: number;
   collider: { width: number; height: number; depth: number };
@@ -37,9 +38,9 @@ export class FactoryMatchConfig {
     tiltX: -40,
     itemLift: 0.15, // raises the seated item so its base rests on the pad (anchor is its center, not its base)
     arcLift: 1.5, // collected item hops this high (world units) above its start/end before landing in the tray
-    shiftHop: 0.35, // how high a seated item hops while sliding to a new slot on reorder (world units)
+    shiftHop: 1.8, // how high a seated item hops while sliding to a new slot on reorder (world units)
     suspensionDip: 0.5, // how far the pad + landed item sink on impact before springing back (world units)
-    matchLift: 0.6, // how high a matched shape rises off the rack before collapsing (world units)
+    matchLift: 1.8, // how high a matched shape rises off the rack before collapsing (world units)
     matchGrow: 1.5, // peak scale of a matched shape during the rise, as a multiple of itemScale
     padWidth: 0.62, // pad size in x (world units) — keep ≤ spacing to avoid neighbours touching
     padDepth: 0.34, // pad size in z (world units)
@@ -51,17 +52,27 @@ export class FactoryMatchConfig {
    * shrinking to nothing. */ 
   public readonly anim = {
     fly: 0.45,
-    slide: 0.28,
+    slide: 0.3,
     trayDrop: 0.25, // how long the tray's fall takes — AND, symmetrically, its rise back (seconds); both block + tray reach the lowest point at the same instant. SMALLER = tray starts later and falls faster; LARGER = starts earlier and falls slower (if it exceeds `fly`, the whole flight stretches to match).
     matchRise: 0.2,
-    matchCollapse: 0.32,
+    matchCollapse: 0.2,
   };
 
   public readonly kinds: Record<Kind, KindDef> = {
-    cube: { color: 0x49c95a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
-    cylinder: { color: 0xf2c14e, collider: { width: 0.52, height: 0.5, depth: 0.52 } },
-    plus: { color: 0x3f8cff, collider: { width: 0.62, height: 0.5, depth: 0.62 } },
-    triprism: { color: 0x9b5cf0, collider: { width: 0.56, height: 0.5, depth: 0.56 } },
+    dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    billardball: { color: 0x1a1a1a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    guitar: { color: 0x8a5a2b, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    radio: { color: 0x2bb1a8, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    gascan: { color: 0xd23b2e, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+  };
+
+  /** 3D model display sizing. Each model is uniformly scaled so its largest
+   * extent equals `fit` × its per-kind `scale` (world units). `fit` sets the
+   * shared baseline; bump a single `scale` entry to make just that model bigger
+   * or smaller. Visual only — does not change the collider. */
+  public readonly models: { fit: number; scale: Record<Kind, number> } = {
+    fit: 0.55,
+    scale: { dice: 1, billardball: 1, guitar: 1, radio: 1, gascan: 1 },
   };
 
   /** How many of each kind to drop into the bin (multiples of matchCount → fully clearable). */

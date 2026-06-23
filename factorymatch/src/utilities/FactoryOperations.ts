@@ -30,7 +30,7 @@ interface SlotItem {
   kind: Kind;
 }
 
-const KIND_ORDER: Kind[] = ["cube", "cylinder", "plus", "triprism"];
+const KIND_ORDER: Kind[] = ["dice", "billardball", "guitar", "radio", "gascan"];
 
 /**
  * All domain logic: builds the static bin (tall colliders) and the falling pile
