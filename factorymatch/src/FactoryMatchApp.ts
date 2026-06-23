@@ -1,4 +1,14 @@
-import { GamelabsApp, LogTypes, UIEvents, UpdateManager, World, type Unsubscribe } from "@gamebyte/gamelabsjs";
+import {
+  AssetRequest,
+  AssetRequestList,
+  AssetTypes,
+  GamelabsApp,
+  LogTypes,
+  UIEvents,
+  UpdateManager,
+  World,
+  type Unsubscribe,
+} from "@gamebyte/gamelabsjs";
 import { Physics3DBinding, Physics3DManager } from "@gamebyte/gamelabsjs/physics3d";
 
 import { PileView } from "./views/PileView.three";
@@ -7,14 +17,17 @@ import { FactoryScreenView } from "./views/FactoryScreenView.pixi";
 import { FactoryScreenViewController } from "./controllers/FactoryScreenViewController";
 import { FactoryMatchConfig } from "./FactoryMatchConfig";
 import { FactoryMatchUIIds } from "./FactoryMatchUIIds";
+import { FactoryMatchAssetIds } from "./FactoryMatchAssetIds";
 import { GameModel } from "./models/GameModel";
 import { IGameModel } from "./models/IGameModel";
+import { TimerModel } from "./models/TimerModel";
 import { GameEvents } from "./events/GameEvents";
 import { FactoryOperations } from "./utilities/FactoryOperations";
 import { ModelLibraryService } from "./services/ModelLibraryService";
 
 export class FactoryMatchApp extends GamelabsApp {
   private readonly _config = new FactoryMatchConfig();
+  private readonly _assetRequestList = new AssetRequestList();
   private _physicsUnsub: Unsubscribe | null = null;
   private _pileView: PileView | null = null;
 
@@ -37,6 +50,7 @@ export class FactoryMatchApp extends GamelabsApp {
     this.viewDiContainer.bindInstance(ModelLibraryService, this._models);
 
     this.diContainer.bindInstance(GameModel, new GameModel(), [IGameModel]);
+    this.diContainer.bindInstance(TimerModel, new TimerModel());
     this.diContainer.bindInstance(GameEvents, new GameEvents());
     this.diContainer.bindSingleton(FactoryOperations, () => new FactoryOperations());
   }
@@ -44,6 +58,22 @@ export class FactoryMatchApp extends GamelabsApp {
   protected override configureViews(): void {
     this.viewFactory.registerScreen(FactoryMatchUIIds.GameScreen, FactoryScreenView, FactoryScreenViewController);
     this.viewFactory.register(PileView, PileViewController);
+  }
+
+  protected override loadAssets(): void {
+    // HUD textures load through the AssetManager pipeline; the screen view
+    // resolves them by id with `assetLoader.getAsset` once they're ready.
+    const add = (id: FactoryMatchAssetIds, fileName: string): void => {
+      const url = new URL(`../assets/${fileName}`, import.meta.url).href;
+      this._assetRequestList.addRequest(new AssetRequest(AssetTypes.HudTexture, id, url));
+    };
+    add(FactoryMatchAssetIds.TimerBg, "UI_Timer_BG_01.png");
+    add(FactoryMatchAssetIds.GoalBg, "UI_Goal_BG_01.png");
+    add(FactoryMatchAssetIds.MultiplierBg, "UI_Multiplier_BG_Circle_01.png");
+    add(FactoryMatchAssetIds.ResultAllClear, "FBT_TM3D_AllClear.png");
+    add(FactoryMatchAssetIds.ResultTimeIsUp, "FBT_TM3D_TimeIsUp.png");
+    add(FactoryMatchAssetIds.ResultGameOver, "FBT_TM3D_GameOver.png");
+    this.assetManager.loadAll(this._assetRequestList.getRequests());
   }
 
   protected override postInitialize(): void {

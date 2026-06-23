@@ -13,7 +13,11 @@ export interface KindDef {
 export class FactoryMatchConfig {
   public readonly title = "Factory Match";
 
-  /** Static bin the shapes pile up in. */
+  /** Solid clear colour behind the 3D scene (the game background). */
+  public readonly background = 0x3a485b;
+
+  /** Static bin the shapes pile up in. `transparent` hides the floor + glass
+   * walls so the pile floats on the background (the colliders are unaffected). */
   public readonly bin = {
     innerHalf: 1.4, // play area half-extent in x and z
     floorY: 0, // top surface of the floor
@@ -22,6 +26,7 @@ export class FactoryMatchConfig {
     wallColliderHeight: 5.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.16,
     wallColor: 0x3b4250,
+    transparent: true, // skip the bin's visual mesh (colliders stay) — pile sits on the background
   };
 
   /** 3D slot rack in front of the bin where collected shapes fly to and line up.
@@ -32,8 +37,7 @@ export class FactoryMatchConfig {
   public readonly rack = {
     z: 2.35,
     y: 0.32,
-    spacing: 0.76,
-    itemScale: 0.42,
+    itemScale: 0.6,
     itemRotationY: 25,
     tiltX: -40,
     itemLift: 0.15, // raises the seated item so its base rests on the pad (anchor is its center, not its base)
@@ -42,7 +46,11 @@ export class FactoryMatchConfig {
     suspensionDip: 0.5, // how far the pad + landed item sink on impact before springing back (world units)
     matchLift: 1.8, // how high a matched shape rises off the rack before collapsing (world units)
     matchGrow: 1.5, // peak scale of a matched shape during the rise, as a multiple of itemScale
-    padWidth: 0.62, // pad size in x (world units) — keep ≤ spacing to avoid neighbours touching
+    // Tray sizing (world units). Slot pitch = padWidth + gap; the full row spans
+    // (capacity-1)*(padWidth+gap) + padWidth, which must fit the portrait width
+    // (ortho width ≈ frustumHeight * viewport-aspect, ~3.3–4.0 in portrait).
+    padWidth: 0.42, // block width in x
+    gap: 0.06, // empty space between adjacent blocks
     padDepth: 0.34, // pad size in z (world units)
     padColor: 0x222831,
   };
@@ -85,12 +93,25 @@ export class FactoryMatchConfig {
   };
 
   /** How many of each kind to drop into the bin (multiples of matchCount → fully clearable). */
-  public readonly spawnPerKind = 9;
+  public readonly spawnPerKind = 12;
   /** Horizontal jitter + vertical stagger for the initial drop. */
   public readonly spawn = { areaHalf: 1.0, baseY: 1.3, stepY: 0.5 };
 
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
   public readonly slots = { capacity: 7, matchCount: 3, matchPoints: 10 };
+
+  /** Countdown clock shown top-centre. `startSeconds` is the time the player has;
+   * when it reaches zero the game is lost. Displayed as mm:ss. */
+  public readonly time = { startSeconds: 120 };
+
+  /** HUD goal chips (3, shown below the timer). `kind` picks the model shown,
+   * `target` is the displayed count. Placeholder wiring — goal art + completion
+   * rules come later; for now they render their bg + count text. */
+  public readonly goals: { kind: Kind; target: number }[] = [
+    { kind: "dice", target: 15 },
+    { kind: "radio", target: 14 },
+    { kind: "billardball", target: 15 },
+  ];
 
   /** Fixed 3D camera looking down into the bin.
    * `orthographic` swaps the perspective camera for an isometric-style parallel

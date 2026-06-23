@@ -26,6 +26,7 @@ export class PileView extends WorldViewBase implements IPileView {
   private _world: World | null = null;
   private _models: ModelLibraryService | null = null;
   private _prevFog: THREE.Scene["fog"] = null;
+  private _prevBackground: THREE.Scene["background"] = null;
   /** Orthographic (isometric) camera; created + made active when config opts in. */
   private _ortho: THREE.OrthographicCamera | null = null;
   private readonly _bin = new THREE.Group();
@@ -68,6 +69,8 @@ export class PileView extends WorldViewBase implements IPileView {
     if (this._world) {
       this._prevFog = this._world.scene.fog ?? null;
       this._world.scene.fog = null;
+      this._prevBackground = this._world.scene.background ?? null;
+      this._world.scene.background = new THREE.Color(this._config!.background);
     }
     this._setupCamera();
 
@@ -353,8 +356,9 @@ export class PileView extends WorldViewBase implements IPileView {
   private _slotPosition(index: number): { x: number; y: number; z: number } {
     const cfg = this._config!;
     const cap = cfg.slots.capacity;
+    const step = cfg.rack.padWidth + cfg.rack.gap; // centre-to-centre slot pitch
     return {
-      x: (index - (cap - 1) / 2) * cfg.rack.spacing,
+      x: (index - (cap - 1) / 2) * step,
       y: cfg.rack.y,
       z: cfg.rack.z,
     };
@@ -503,6 +507,7 @@ export class PileView extends WorldViewBase implements IPileView {
 
   private _buildBinVisual(): void {
     const { bin } = this._config!;
+    if (bin.transparent) return; // pile floats on the background; colliders live in FactoryOperations
     const t = bin.wallThickness;
     const span = bin.innerHalf * 2 + t * 2;
     const edge = bin.innerHalf + t / 2;
@@ -558,6 +563,7 @@ export class PileView extends WorldViewBase implements IPileView {
     PileView._disposeObject(this._rack);
     if (this._world) {
       this._world.scene.fog = this._prevFog;
+      this._world.scene.background = this._prevBackground;
       if (this._ortho) this._world.setActiveCamera(this._world.camera); // restore perspective
     }
     this._ortho = null;

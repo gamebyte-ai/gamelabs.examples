@@ -10,6 +10,7 @@ import {
 
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
 import { GameModel } from "../models/GameModel.js";
+import { TimerModel } from "../models/TimerModel.js";
 import type { Kind } from "../models/IGameModel.js";
 
 /** Creates the mesh for a spawned pile shape. Injected by the controller; the engine never sees a renderer. */
@@ -42,6 +43,7 @@ export class FactoryOperations {
   private _physics: Physics3DManager | null = null;
   private _config: FactoryMatchConfig | null = null;
   private _model: GameModel | null = null;
+  private _timer: TimerModel | null = null;
   private _stage: Physics3DStage | null = null;
   private _makeView: EntityViewFactory | null = null;
 
@@ -58,6 +60,7 @@ export class FactoryOperations {
     this._physics = resolver.getInstance(Physics3DManager);
     this._config = resolver.getInstance(FactoryMatchConfig);
     this._model = resolver.getInstance(GameModel);
+    this._timer = resolver.getInstance(TimerModel);
     this._stage = new Physics3DStage(this._physics);
   }
 
@@ -75,6 +78,7 @@ export class FactoryOperations {
     this._slots = [];
     this._nextItemId = 1;
     this._model!.reset();
+    this._timer!.reset();
 
     this._buildBin();
     this._buildPile();
@@ -139,12 +143,6 @@ export class FactoryOperations {
     if (kind === undefined) return null; // hit the bin, not a shape
 
     const cfg = this._config!;
-    // Full tray: the pick is rejected and the game ends — no exception, even if
-    // this kind would complete a match. The shape stays in the pile (not despawned).
-    if (this._slots.length >= cfg.slots.capacity) {
-      this._model!.setStatus("lost");
-      return null;
-    }
 
     const t = this._physics!.getTransform(hit.body, this._t);
     const from = { x: t.x, y: t.y, z: t.z };
@@ -163,15 +161,22 @@ export class FactoryOperations {
       this._model!.setScore(this._model!.score + cfg.slots.matchPoints);
     }
 
+    // Win on an empty pile; otherwise lose the moment the tray fills with no room
+    // left (this pick reached capacity without clearing a match).
     if (this._pile.size === 0) this._model!.setStatus("won");
+    else if (this._slots.length >= cfg.slots.capacity) this._model!.setLost("tray");
 
     return { addedId, kind, from, clearedIds };
   }
 
   //  PER-FRAME / LIFECYCLE
 
-  public update(_dt: number): void {
+  public update(dt: number): void {
     this._stage!.sync();
+    // Countdown only runs while playing; hitting zero ends the game.
+    if (this._model!.status !== "playing") return;
+    this._timer!.tick(dt);
+    if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
   }
 
   public reset(): void {
@@ -187,6 +192,7 @@ export class FactoryOperations {
     this._physics = null;
     this._config = null;
     this._model = null;
+    this._timer = null;
     this._stage = null;
     this._makeView = null;
   }
