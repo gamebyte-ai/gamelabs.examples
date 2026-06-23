@@ -19,7 +19,7 @@ const MULT_X = 54; // multiplier badge centre, fixed px from the left edge
 const BOOSTER_H = 76; // on-screen height of each bottom booster button
 const BOOSTER_GAP = 56; // px between the two booster buttons
 const BOOSTER_BOTTOM = 72; // booster row centre, fixed px up from the bottom edge
-const BANNER_WIDTH_FRACTION = 0.82; // end banner width relative to the viewport
+const BANNER_WIDTH = 360; // end banner on-screen width (px), fixed — does not scale with the viewport
 
 const RESULT_ASSET: Record<GameResult, FactoryMatchAssetIds> = {
   allClear: FactoryMatchAssetIds.ResultAllClear,
@@ -259,11 +259,10 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._goals.forEach((chip, i) => chip.position.set(startX + i * step, y));
   }
 
-  /** Scale the end banner to a fraction of the viewport width and centre it. */
+  /** Scale the end banner to a fixed on-screen width (not viewport-relative) and centre it. */
   private _layoutBanner(): void {
     if (!this._banner.texture) return;
-    const scale = (this._w * BANNER_WIDTH_FRACTION) / this._banner.texture.width;
-    this._banner.scale.set(scale);
+    this._banner.scale.set(BANNER_WIDTH / this._banner.texture.width);
     this._banner.position.set(this._w / 2, this._h * 0.42);
   }
 

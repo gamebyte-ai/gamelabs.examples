@@ -23,9 +23,9 @@ export class FactoryMatchConfig {
     halfDepth: 1.4, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
-    wallHeight: 1.0, // visible glass-wall height
-    wallColliderHeight: 5.0, // collider extends higher than the glass so shapes can't bounce out
-    wallThickness: 0.16,
+    wallHeight: 6.0, // visible glass-wall height
+    wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
+    wallThickness: 0.5,
     wallColor: 0x3b4250,
     transparent: true, // skip the bin's visual mesh (colliders stay) — pile sits on the background
   };
@@ -84,7 +84,7 @@ export class FactoryMatchConfig {
     size: Record<Kind, number>;
     rotation: Record<Kind, { x: number; y: number; z: number }>;
   } = {
-    size: { dice: 0.35, billardball: 0.4, guitar: 1, radio: 0.6, gascan: 0.6 },
+    size: { dice: 0.3, billardball: 0.35, guitar: 0.9, radio: 0.5, gascan: 0.5 },
     rotation: {
       dice: { x: 0, y: 0, z: 0 },
       billardball: { x: 0, y: 0, z: 0 },
@@ -97,17 +97,19 @@ export class FactoryMatchConfig {
   /** How many of each kind to drop into the bin, per kind (keep each a multiple of
    * matchCount → fully clearable). */
   public readonly spawnPerKind: Record<Kind, number> = {
-    dice: 12,
-    billardball: 12,
-    guitar: 12,
-    radio: 12,
-    gascan: 12,
+    dice: 18,
+    billardball: 18,
+    guitar: 24,
+    radio: 18,
+    gascan: 24,
   };
-  /** Initial drop placement. `baseY` is the lowest spawn height; each successive
-   * item is staggered `stepY` higher (so they don't spawn inside each other), and
-   * `areaHalf` is the x/z jitter. Drop height grows with item count — the topmost
-   * item starts at baseY + (count-1) * stepY, so lower stepY/baseY to drop lower. */
-  public readonly spawn = { areaHalf: 1.0, baseY: 1.3, stepY: 0.45 };
+  /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
+   * bin (so they spawn together as a compact cloud, not a tall column): `cell` is
+   * the x/z grid spacing (keep ≥ item size to avoid overlap), `layerGap` the
+   * vertical gap between stacked layers, `baseY` the lowest layer, and `jitter` a
+   * small random offset per axis for a natural look. Total drop height stays low —
+   * a handful of layers regardless of item count. */
+  public readonly spawn = { cell: 0.4, layerGap: 0.3, baseY: 3.5, jitter: 0.5 };
 
   /** World physics (applied to ALL contacts via the engine's default contact
    * material, so it governs item↔item piling, not just item↔floor). `gravity` is
@@ -119,7 +121,7 @@ export class FactoryMatchConfig {
     gravity: -10.82,
     gravityAfterStart: -7.82,
     restitution: 0,
-    friction: 1,
+    friction: 0.01,
     // The pile is simulated only in short bursts, then frozen, so idle items
     // don't jitter forever. `settleSeconds` is the physics-on window after each
     // pick; `initialSettleSeconds` is the longer window after a (re)build so the
@@ -151,9 +153,9 @@ export class FactoryMatchConfig {
    * `target` is the displayed count. Placeholder wiring — goal art + completion
    * rules come later; for now they render their bg + count text. */
   public readonly goals: { kind: Kind; target: number }[] = [
-    { kind: "dice", target: 15 },
-    { kind: "radio", target: 14 },
-    { kind: "billardball", target: 15 },
+    { kind: "dice", target: 18 },
+    { kind: "radio", target: 18 },
+    { kind: "billardball", target: 18 },
   ];
 
   /** HUD layout (screen pixels). `topY` is the timer + score row centre; `goalsY`
@@ -178,8 +180,8 @@ export class FactoryMatchConfig {
    * world-space extent the camera shows — smaller = more zoomed in. Width is
    * derived from the viewport aspect, so portrait framing stays consistent. */
   public readonly camera = {
-    position: { x: 0, y: 6.6, z: 1.4 },
-    lookAt: { x: 0, y: 0.35, z: 0.2 },
+    position: { x: 0, y: 28.6, z: 2.2 },
+    lookAt: { x: 0, y: 0.85, z: 0.1 },
     orthographic: true,
     frustumHeight: 7.2,
   };

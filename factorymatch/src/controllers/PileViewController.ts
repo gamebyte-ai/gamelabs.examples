@@ -56,16 +56,12 @@ export class PileViewController implements IViewController<IPileView> {
   }
 
   private _onPick(bodyId: number | null): void {
-    if (this._model!.status === "playing") {
-      if (bodyId === null) return; // clicked empty space — nothing to collect
-      const result = this._ops!.pick(bodyId);
-      if (result) {
-        this._view!.applyCollect(result);
-        if (result.goal) this._events!.emitGoalChanged(result.goal.index, result.goal.remaining);
-      }
-    } else {
-      this._ops!.reset(); // a click after game over restarts
-      this._view!.clearSlots();
+    // Only collect while playing; clicks after game over do nothing (no restart).
+    if (this._model!.status !== "playing" || bodyId === null) return;
+    const result = this._ops!.pick(bodyId);
+    if (result) {
+      this._view!.applyCollect(result);
+      if (result.goal) this._events!.emitGoalChanged(result.goal.index, result.goal.remaining);
     }
     this._publishHud();
   }

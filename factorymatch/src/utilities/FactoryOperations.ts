@@ -104,6 +104,9 @@ export class FactoryOperations {
     const spanZ = bin.halfDepth * 2 + t * 2;
     const ch = bin.wallColliderHeight;
     const wy = bin.floorY + ch / 2;
+    // Pin each wall's INNER face at the play-area boundary (halfWidth/halfDepth)
+    // and centre it half a thickness outside, so growing `wallThickness` extends
+    // the wall strictly outward — it never eats into the play area.
     const edgeX = bin.halfWidth + t / 2;
     const edgeZ = bin.halfDepth + t / 2;
 
@@ -128,15 +131,33 @@ export class FactoryOperations {
     for (const kind of KIND_ORDER) for (let i = 0; i < cfg.spawnPerKind[kind]; i++) drops.push(kind);
     this._shuffle(drops);
 
+    // Lay items out on a loose grid that fills the bin and stacks in layers, so
+    // they spawn together as a compact cloud (no tall single-column tower) and
+    // start low. Grid cells are sized to avoid spawn overlap.
+    const { cell, layerGap, baseY, jitter } = cfg.spawn;
+    const cols = Math.max(1, Math.floor((cfg.bin.halfWidth * 2) / cell));
+    const rows = Math.max(1, Math.floor((cfg.bin.halfDepth * 2) / cell));
+    const perLayer = cols * rows;
+    const rand = (): number => (Math.random() * 2 - 1) * jitter;
+    const clamp = (v: number, lim: number): number => Math.max(-lim, Math.min(lim, v));
+
     drops.forEach((kind, i) => {
       const c = cfg.kinds[kind].collider;
+      const layer = Math.floor(i / perLayer);
+      const slot = i % perLayer;
+      const col = slot % cols;
+      const row = Math.floor(slot / cols);
+      // Keep the whole item (incl. jitter) inside the walls so nothing spawns
+      // outside the bin and falls away.
+      const limX = Math.max(0, cfg.bin.halfWidth - c.width / 2);
+      const limZ = Math.max(0, cfg.bin.halfDepth - c.depth / 2);
       const view = this._makeView!(kind);
       const id = this._stage!.spawn(
         {
           shape: { kind: "box", width: c.width, height: c.height, depth: c.depth },
-          x: (Math.random() * 2 - 1) * cfg.spawn.areaHalf,
-          y: cfg.spawn.baseY + i * cfg.spawn.stepY,
-          z: (Math.random() * 2 - 1) * cfg.spawn.areaHalf,
+          x: clamp((col - (cols - 1) / 2) * cell + rand(), limX),
+          y: baseY + layer * layerGap + rand(),
+          z: clamp((row - (rows - 1) / 2) * cell + rand(), limZ),
           type: "dynamic",
           mass: 1,
           // friction/restitution come from the world default contact material
