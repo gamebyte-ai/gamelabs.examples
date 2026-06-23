@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import gsap from "gsap";
 import { WorldViewBase, World, type IInstanceResolver, type Unsubscribe } from "@gamebyte/gamelabsjs";
-import type { Physics3DEntityView } from "@gamebyte/gamelabsjs/physics3d";
+import type { BodyId, Physics3DEntityView } from "@gamebyte/gamelabsjs/physics3d";
 import type { IPileView } from "./IPileView.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
 import { ModelLibraryService } from "../services/ModelLibraryService.js";
@@ -9,6 +9,8 @@ import type { CollectResult } from "../utilities/FactoryOperations.js";
 import type { Kind } from "../models/IGameModel.js";
 
 const PICK_RANGE = 40;
+const OUTLINE_MASK_ORDER = 998; // stencil mask of the hovered shape's silhouette…
+const OUTLINE_RIM_ORDER = 999; // …then the rim, drawn only outside it, over other items
 
 interface SlotMesh {
   kind: Kind;
@@ -33,9 +35,9 @@ export class PileView extends WorldViewBase implements IPileView {
   private readonly _rack = new THREE.Group();
 
   private readonly _ray = new THREE.Raycaster();
-  private readonly _pickListeners = new Set<
-    (ox: number, oy: number, oz: number, fx: number, fy: number, fz: number) => void
-  >();
+  private readonly _pickListeners = new Set<(bodyId: BodyId | null) => void>();
+  /** Maps each pile shape to its physics body, so a visual pick resolves to a body. */
+  private readonly _bodyByObject = new Map<THREE.Object3D, BodyId>();
   private _pointerTarget: HTMLElement | null = null;
 
   /** Pile shapes eligible for hover/press selection (raycast targets). */
@@ -128,7 +130,7 @@ export class PileView extends WorldViewBase implements IPileView {
 
   //  PILE ENTITY — stage drives the returned adapter
 
-  public createEntity(kind: Kind): Physics3DEntityView {
+  public createEntity(kind: Kind): Physics3DEntityView & { onSpawned(id: BodyId): void } {
     const obj = this._makeShape(kind);
     this.add(obj);
     this._pileObjects.add(obj);
@@ -137,9 +139,13 @@ export class PileView extends WorldViewBase implements IPileView {
         obj.position.set(t.x, t.y, t.z);
         obj.quaternion.set(t.qx, t.qy, t.qz, t.qw);
       },
+      onSpawned: (id: BodyId): void => {
+        this._bodyByObject.set(obj, id);
+      },
       dispose: (): void => {
         if (this._hovered === obj) this._setHover(null);
         this._pileObjects.delete(obj);
+        this._bodyByObject.delete(obj);
         PileView._disposeObject(obj);
       },
     };
@@ -377,9 +383,7 @@ export class PileView extends WorldViewBase implements IPileView {
 
   //  INPUT
 
-  public onPick(
-    cb: (ox: number, oy: number, oz: number, fx: number, fy: number, fz: number) => void,
-  ): Unsubscribe {
+  public onPick(cb: (bodyId: BodyId | null) => void): Unsubscribe {
     this._pickListeners.add(cb);
     return () => this._pickListeners.delete(cb);
   }
@@ -388,16 +392,16 @@ export class PileView extends WorldViewBase implements IPileView {
     const camera = this._world?.activeCamera;
     const ndc = this._ndcFromEvent(event);
     if (!camera || !ndc) return;
-    this._ray.setFromCamera(ndc, camera);
-    const o = this._ray.ray.origin;
-    const d = this._ray.ray.direction;
-    for (const cb of this._pickListeners) {
-      cb(o.x, o.y, o.z, o.x + d.x * PICK_RANGE, o.y + d.y * PICK_RANGE, o.z + d.z * PICK_RANGE);
-    }
+    // Resolve the click against the visible meshes (precise), then report that
+    // shape's body so the collected item always matches what the player sees —
+    // box colliders alone would let a neighbour intercept a grazing ray.
+    const picked = this._pickPileObject(event);
+    const bodyId = picked ? (this._bodyByObject.get(picked) ?? null) : null;
+    for (const cb of this._pickListeners) cb(bodyId);
     // Touch/pen: outline the pressed shape for as long as the finger is held.
     if (event.pointerType !== "mouse") {
       this._pressActive = true;
-      this._setHover(this._pickPileObject(event));
+      this._setHover(picked);
     }
   };
 
@@ -457,30 +461,50 @@ export class PileView extends WorldViewBase implements IPileView {
   }
 
   /**
-   * Inverted-hull silhouette: a slightly enlarged back-faces-only copy of each
-   * mesh. The shape's own front faces (drawn first, default renderOrder 0) cover
-   * the hull's centre via the depth buffer, leaving only the outer rim — i.e. the
-   * 2D screen contour, with no internal/back edges. Geometry is shared with the
-   * source mesh, so it is NOT disposed on clear.
+   * Thin screen-space outline drawn on top of everything. Two passes per mesh,
+   * both depth-test-off so they ignore occluders:
+   *   1) a stencil-only mask that marks the shape's on-screen silhouette (ref 1);
+   *   2) an enlarged back-faces hull that draws only where the stencil is NOT 1 —
+   *      i.e. just the rim outside the silhouette, not the filled interior.
+   * The result is a clean contour around the visible 2D shape, floating over any
+   * items stacked in front. Geometry is shared; only the per-pass materials are
+   * disposed on clear.
    */
   private _applyOutline(obj: THREE.Object3D): void {
     const cfg = this._config!;
-    // Collect first: adding hull children during traverse() would make traverse
-    // recurse into the freshly added hull (itself a Mesh) → infinite recursion.
+    // Collect first: adding children during traverse() would make traverse recurse
+    // into the freshly added meshes → infinite recursion.
     const meshes: THREE.Mesh[] = [];
     obj.traverse((node) => {
       if (node instanceof THREE.Mesh) meshes.push(node);
     });
     for (const node of meshes) {
-      const hull = new THREE.Mesh(
-        node.geometry,
-        new THREE.MeshBasicMaterial({ color: cfg.outline.color, side: THREE.BackSide, depthWrite: false }),
-      );
-      hull.scale.setScalar(cfg.outline.scale);
-      hull.renderOrder = 1; // after the shape so only the rim survives the depth test
-      hull.raycast = (): void => {}; // never picked itself
-      node.add(hull);
-      this._outlineParts.push(hull);
+      const maskMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false });
+      maskMat.stencilWrite = true;
+      maskMat.stencilRef = 1;
+      maskMat.stencilFunc = THREE.AlwaysStencilFunc;
+      maskMat.stencilZPass = THREE.ReplaceStencilOp;
+      const mask = new THREE.Mesh(node.geometry, maskMat);
+      mask.renderOrder = OUTLINE_MASK_ORDER;
+      mask.raycast = (): void => {};
+      node.add(mask);
+      this._outlineParts.push(mask);
+
+      const rimMat = new THREE.MeshBasicMaterial({
+        color: cfg.outline.color,
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: false,
+      });
+      rimMat.stencilWrite = true;
+      rimMat.stencilRef = 1;
+      rimMat.stencilFunc = THREE.NotEqualStencilFunc; // draw only outside the masked silhouette
+      const rim = new THREE.Mesh(node.geometry, rimMat);
+      rim.scale.setScalar(cfg.outline.scale);
+      rim.renderOrder = OUTLINE_RIM_ORDER;
+      rim.raycast = (): void => {};
+      node.add(rim);
+      this._outlineParts.push(rim);
     }
   }
 
@@ -571,6 +595,7 @@ export class PileView extends WorldViewBase implements IPileView {
     this._clearOutline();
     this._hovered = null;
     this._pileObjects.clear();
+    this._bodyByObject.clear();
     this.clearSlots();
     PileView._disposeObject(this._bin);
     PileView._disposeObject(this._rack);

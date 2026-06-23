@@ -41,7 +41,9 @@ export class PileViewController implements IViewController<IPileView> {
     this._view = view;
     this._ops!.bindView((kind) => view.createEntity(kind));
 
-    this._subs.add(view.onPick((ox, oy, oz, fx, fy, fz) => this._onPick(ox, oy, oz, fx, fy, fz)));
+    this._subs.add(view.onPick((bodyId) => this._onPick(bodyId)));
+    // The HUD intro countdown fires this when it finishes; play begins then.
+    this._subs.add(this._events!.onStarted(() => this._ops!.start()));
     this._updateUnsub = this._updateManager!.register((dt) => this._onUpdate(dt));
 
     this._ops!.buildLevel();
@@ -53,9 +55,10 @@ export class PileViewController implements IViewController<IPileView> {
     this._publishHud();
   }
 
-  private _onPick(ox: number, oy: number, oz: number, fx: number, fy: number, fz: number): void {
+  private _onPick(bodyId: number | null): void {
     if (this._model!.status === "playing") {
-      const result = this._ops!.pick(ox, oy, oz, fx, fy, fz);
+      if (bodyId === null) return; // clicked empty space — nothing to collect
+      const result = this._ops!.pick(bodyId);
       if (result) {
         this._view!.applyCollect(result);
         if (result.goal) this._events!.emitGoalChanged(result.goal.index, result.goal.remaining);

@@ -94,8 +94,15 @@ export class FactoryMatchConfig {
     },
   };
 
-  /** How many of each kind to drop into the bin (multiples of matchCount → fully clearable). */
-  public readonly spawnPerKind = 12;
+  /** How many of each kind to drop into the bin, per kind (keep each a multiple of
+   * matchCount → fully clearable). */
+  public readonly spawnPerKind: Record<Kind, number> = {
+    dice: 12,
+    billardball: 12,
+    guitar: 12,
+    radio: 12,
+    gascan: 12,
+  };
   /** Initial drop placement. `baseY` is the lowest spawn height; each successive
    * item is staggered `stepY` higher (so they don't spawn inside each other), and
    * `areaHalf` is the x/z jitter. Drop height grows with item count — the topmost
@@ -104,10 +111,13 @@ export class FactoryMatchConfig {
 
   /** World physics (applied to ALL contacts via the engine's default contact
    * material, so it governs item↔item piling, not just item↔floor). `gravity` is
-   * the y acceleration (m/s², more negative = faster fall); `restitution` is the
-   * bounce [0,1]; `friction` resists sliding. */
+   * the y acceleration (m/s², more negative = faster fall) for the opening drop;
+   * `gravityAfterStart` replaces it once play begins (applied as a per-body
+   * correction force, since the world gravity is fixed at creation);
+   * `restitution` is the bounce [0,1]; `friction` resists sliding. */
   public readonly physics = {
-    gravity: -12.82,
+    gravity: -10.82,
+    gravityAfterStart: -7.82,
     restitution: 0,
     friction: 1,
     // The pile is simulated only in short bursts, then frozen, so idle items
@@ -115,7 +125,19 @@ export class FactoryMatchConfig {
     // pick; `initialSettleSeconds` is the longer window after a (re)build so the
     // first drop has time to come to rest before freezing.
     settleSeconds:0.5,
-    initialSettleSeconds: 3.6,
+    initialSettleSeconds:4,
+  };
+
+  /** Start-of-game intro: a 3-2-1 countdown (using the number assets) then "Go!".
+   * Play is blocked + the clock is paused until it finishes. `stepSeconds` is how
+   * long each beat is shown; `numberH`/`goH` are on-screen heights; `peakScale` is
+   * the pop's overshoot; `goText` is the placeholder until the Go art lands. */
+  public readonly countdown = {
+    stepSeconds:1.2,
+    numberH: 180,
+    goH: 200,
+    peakScale: 0.7,
+    goText: "GO!",
   };
 
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
@@ -146,7 +168,7 @@ export class FactoryMatchConfig {
     goalTextY: 24,
     goalIconH: 46,
     goalIconY: -14,
-    goalPulseScale: 1.3, // peak scale of a goal chip's pop when its count ticks down
+    goalPulseScale: 1.2, // peak scale of a goal chip's pop when its count ticks down
     goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
   };
 
@@ -166,7 +188,7 @@ export class FactoryMatchConfig {
    * (touch). Rendered as an inverted hull: a back-faces-only copy enlarged by
    * `scale`, so only the outer screen contour shows. `scale` sets rim thickness
    * (1.04 = 4% larger than the shape). */
-  public readonly outline = { color: 0xffffff, scale: 1.04 };
+  public readonly outline = { color: 0xffea00, scale: 1.08 };
 
   public readonly transitions: { gameScreenEnter: ScreenTransition } = {
     gameScreenEnter: { type: SCREEN_TRANSITION_TYPES.INSTANT, durationMs: 0 },

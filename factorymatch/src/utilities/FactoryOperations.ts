@@ -13,8 +13,10 @@ import { GameModel } from "../models/GameModel.js";
 import { TimerModel } from "../models/TimerModel.js";
 import type { Kind } from "../models/IGameModel.js";
 
-/** Creates the mesh for a spawned pile shape. Injected by the controller; the engine never sees a renderer. */
-export type EntityViewFactory = (kind: Kind) => Physics3DEntityView;
+/** Creates the mesh for a spawned pile shape. Injected by the controller; the
+ * engine never sees a renderer. `onSpawned` (if present) is called with the new
+ * body id so the view can map its mesh → body for precise picking. */
+export type EntityViewFactory = (kind: Kind) => Physics3DEntityView & { onSpawned?(id: BodyId): void };
 
 /** Result of a successful pick — drives the view's fly-to-slot + match animations. */
 export interface CollectResult {
@@ -123,11 +125,12 @@ export class FactoryOperations {
   private _buildPile(): void {
     const cfg = this._config!;
     const drops: Kind[] = [];
-    for (const kind of KIND_ORDER) for (let i = 0; i < cfg.spawnPerKind; i++) drops.push(kind);
+    for (const kind of KIND_ORDER) for (let i = 0; i < cfg.spawnPerKind[kind]; i++) drops.push(kind);
     this._shuffle(drops);
 
     drops.forEach((kind, i) => {
       const c = cfg.kinds[kind].collider;
+      const view = this._makeView!(kind);
       const id = this._stage!.spawn(
         {
           shape: { kind: "box", width: c.width, height: c.height, depth: c.depth },
@@ -140,28 +143,34 @@ export class FactoryOperations {
           // (FactoryMatchConfig.physics) so item↔item contacts honour them too.
           tag: kind,
         },
-        this._makeView!(kind),
+        view,
       ).id;
       this._pile.set(id, kind);
+      view.onSpawned?.(id); // let the view map this mesh → body for precise picking
     });
   }
 
-  //  PICK (ray from the camera, world space) → collect
+  //  PICK — collect a specific pile body (chosen by the view's visual raycast)
 
-  public pick(ox: number, oy: number, oz: number, fx: number, fy: number, fz: number): CollectResult | null {
-    if (this._model!.status !== "playing") return null;
-    // Pick ray hits only group-1 bodies (the pile), passing through the bin (group 2).
-    const hit = this._physics!.raycast(ox, oy, oz, fx, fy, fz, { collisionMask: 1 });
-    if (!hit) return null;
-    const kind = this._pile.get(hit.body);
-    if (kind === undefined) return null; // hit the bin, not a shape
+  /** Begin play once the intro countdown completes (enables picks + the clock). */
+  public start(): void {
+    this._model!.setStarted(true);
+  }
+
+  /** Collect the given pile body. The view resolves which body via a precise mesh
+   * raycast, so the collected item always matches the one the player sees/outlines
+   * (box colliders alone would let a neighbour intercept the ray). */
+  public pick(bodyId: BodyId): CollectResult | null {
+    if (!this._model!.started || this._model!.status !== "playing") return null;
+    const kind = this._pile.get(bodyId);
+    if (kind === undefined) return null; // already collected / not a pile body
 
     const cfg = this._config!;
 
-    const t = this._physics!.getTransform(hit.body, this._t);
+    const t = this._physics!.getTransform(bodyId, this._t);
     const from = { x: t.x, y: t.y, z: t.z };
-    this._stage!.despawn(hit.body); // collider off — the shape leaves the simulation
-    this._pile.delete(hit.body);
+    this._stage!.despawn(bodyId); // collider off — the shape leaves the simulation
+    this._pile.delete(bodyId);
     this._settle = cfg.physics.settleSeconds; // wake the pile so it resettles into the gap, then freeze
 
     const addedId = this._nextItemId++;
@@ -202,10 +211,19 @@ export class FactoryOperations {
   public update(dt: number): void {
     this._stage!.sync();
     if (this._settle > 0) this._settle = Math.max(0, this._settle - dt); // burn down the physics-on window
-    // Countdown only runs while playing; hitting zero ends the game.
-    if (this._model!.status !== "playing") return;
+    // The clock only runs once play has begun (after the intro countdown) and
+    // while playing; hitting zero ends the game.
+    if (!this._model!.started || this._model!.status !== "playing") return;
     this._timer!.tick(dt);
     if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
+
+    // World gravity (set at creation) is the drop value; once play has begun,
+    // nudge the simulated pile to the after-start gravity via a per-body force.
+    if (this._settle > 0) {
+      const phys = this._config!.physics;
+      const dg = phys.gravityAfterStart - phys.gravity; // bodies have mass 1, so force == accel
+      if (dg !== 0) for (const id of this._pile.keys()) this._physics!.applyForce(id, 0, dg, 0);
+    }
   }
 
   public reset(): void {

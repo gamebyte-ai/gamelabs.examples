@@ -10,6 +10,7 @@ export class GameEvents {
   private readonly _scoreChanged = new Set<(score: number) => void>();
   private readonly _statusChanged = new Set<(status: GameStatus) => void>();
   private readonly _goalChanged = new Set<(index: number, remaining: number) => void>();
+  private readonly _started = new Set<() => void>();
 
   public onScoreChanged(cb: (score: number) => void): Unsubscribe {
     this._scoreChanged.add(cb);
@@ -33,5 +34,14 @@ export class GameEvents {
   }
   public emitGoalChanged(index: number, remaining: number): void {
     for (const cb of this._goalChanged) cb(index, remaining);
+  }
+
+  /** Fired when the intro countdown finishes — play should begin. */
+  public onStarted(cb: () => void): Unsubscribe {
+    this._started.add(cb);
+    return () => this._started.delete(cb);
+  }
+  public emitStarted(): void {
+    for (const cb of this._started) cb();
   }
 }

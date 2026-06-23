@@ -50,6 +50,12 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _boosterSpring = new PIXI.Sprite();
 
   private readonly _banner = new PIXI.Sprite();
+  // Intro countdown: a number sprite (3/2/1) and a "Go" text, centred + popped.
+  private readonly _countNode = new PIXI.Container();
+  private readonly _countSprite = new PIXI.Sprite();
+  private readonly _goNode = new PIXI.Container();
+  private _goText: PIXI.Text | null = null;
+  private _countdownTl: gsap.core.Timeline | null = null;
   private _w = 1;
   private _h = 1;
 
@@ -103,6 +109,17 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._banner.visible = false;
     this.addChild(this._banner);
 
+    // Countdown overlay sits on top of everything.
+    this._countSprite.anchor.set(0.5);
+    this._countNode.addChild(this._countSprite);
+    this._countNode.visible = false;
+    this._goText = this._makeText(this._config!.countdown.goH, 0xf5d35a, "800");
+    this._goText.anchor.set(0.5);
+    this._goText.text = this._config!.countdown.goText;
+    this._goNode.addChild(this._goText);
+    this._goNode.visible = false;
+    this.addChild(this._countNode, this._goNode);
+
     this.setScore(0);
     this.setTime("--:--");
   }
@@ -149,6 +166,55 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._banner.visible = false;
   }
 
+  public playCountdown(onDone: () => void): void {
+    if (this._countdownTl) return; // already running (ignore the duplicate trigger)
+    const cfg = this._config!.countdown;
+    const tl = gsap.timeline({
+      onComplete: () => {
+        this._countdownTl = null;
+        this._countNode.visible = false;
+        this._goNode.visible = false;
+        onDone();
+      },
+    });
+    this._countdownTl = tl;
+
+    const numbers = [
+      FactoryMatchAssetIds.CountdownNum3,
+      FactoryMatchAssetIds.CountdownNum2,
+      FactoryMatchAssetIds.CountdownNum1,
+    ];
+    for (const id of numbers) {
+      const tex = this.assetLoader.getAsset<PIXI.Texture>(id);
+      tl.call(() => {
+        if (tex) {
+          this._countSprite.texture = tex;
+          this._countSprite.scale.set(cfg.numberH / tex.height);
+        }
+        this._countNode.visible = true;
+        this._countNode.alpha = 1;
+        this._countNode.scale.set(0);
+      });
+      this._addPop(tl, this._countNode);
+      tl.set(this._countNode, { visible: false });
+    }
+
+    tl.call(() => {
+      this._goNode.visible = true;
+      this._goNode.alpha = 1;
+      this._goNode.scale.set(0);
+    });
+    this._addPop(tl, this._goNode);
+  }
+
+  /** Queue a beat onto `tl`: pop in (scale up), then vanish (scale up + fade). */
+  private _addPop(tl: gsap.core.Timeline, node: PIXI.Container): void {
+    const cfg = this._config!.countdown;
+    tl.to(node.scale, { x: cfg.peakScale, y: cfg.peakScale, duration: cfg.stepSeconds * 0.4, ease: "back.out(2)" });
+    tl.to(node.scale, { x: cfg.peakScale * 1.6, y: cfg.peakScale * 1.6, duration: cfg.stepSeconds * 0.5, ease: "power2.in" });
+    tl.to(node, { alpha: 0, duration: cfg.stepSeconds * 0.5, ease: "power2.in" }, "<");
+  }
+
   public override onResize(width: number, height: number, dpr: number): void {
     super.onResize(width, height, dpr);
     this._w = Math.max(1, width);
@@ -168,6 +234,10 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
 
     this._multiplier.position.set(MULT_X, MULT_Y);
     this._layoutGoals();
+
+    const centre = { x: this._w / 2, y: this._h * 0.42 };
+    this._countNode.position.set(centre.x, centre.y);
+    this._goNode.position.set(centre.x, centre.y);
 
     // Two booster buttons centred as a pair near the bottom edge.
     const boosterY = this._h - BOOSTER_BOTTOM;

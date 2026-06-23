@@ -5,6 +5,7 @@ export class GameModel implements IGameModel {
   private _score = 0;
   private _status: GameStatus = "playing";
   private _lostReason: LoseReason | null = null;
+  private _started = false;
 
   public get score(): number {
     return this._score;
@@ -16,6 +17,15 @@ export class GameModel implements IGameModel {
 
   public get lostReason(): LoseReason | null {
     return this._lostReason;
+  }
+
+  public get started(): boolean {
+    return this._started;
+  }
+
+  /** Begin play once the intro countdown finishes. */
+  public setStarted(value: boolean): void {
+    this._started = value;
   }
 
   public setScore(value: number): void {
@@ -36,5 +46,6 @@ export class GameModel implements IGameModel {
     this._score = 0;
     this._status = "playing";
     this._lostReason = null;
+    this._started = false;
   }
 }

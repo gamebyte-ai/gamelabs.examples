@@ -19,6 +19,10 @@ export enum FactoryMatchAssetIds {
   // Bottom-bar booster buttons.
   BoosterFan = "FactoryMatch.BoosterFan",
   BoosterSpring = "FactoryMatch.BoosterSpring",
+  // Start-of-game countdown numbers (3, 2, 1).
+  CountdownNum1 = "FactoryMatch.CountdownNum1",
+  CountdownNum2 = "FactoryMatch.CountdownNum2",
+  CountdownNum3 = "FactoryMatch.CountdownNum3",
 }
 
 /** Goal-chip icon per kind. Kinds without an icon render their count only. */

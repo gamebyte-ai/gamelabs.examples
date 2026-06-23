@@ -57,9 +57,11 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
     if (status === "won") this._view!.showResult("allClear");
     else if (status === "lost") this._view!.showResult(this._model!.lostReason === "time" ? "timeUp" : "gameOver");
     else {
-      // Back to playing (initial or restart): clear the banner + reset goal counts.
+      // Back to playing (initial or restart): clear the banner, reset goal counts,
+      // and run the intro countdown; play begins when it finishes.
       this._view!.hideBanner();
       this._config!.goals.forEach((goal, i) => this._view!.setGoal(i, goal.target));
+      this._view!.playCountdown(() => this._events!.emitStarted());
     }
   }
 

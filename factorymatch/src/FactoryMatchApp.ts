@@ -85,6 +85,9 @@ export class FactoryMatchApp extends GamelabsApp {
     add(FactoryMatchAssetIds.GoalIconBillard, "BillardBall_8.png");
     add(FactoryMatchAssetIds.BoosterFan, "UI_Booster_Fan_Passive_01.png");
     add(FactoryMatchAssetIds.BoosterSpring, "UI_Booster_Spring_Passive_01.png");
+    add(FactoryMatchAssetIds.CountdownNum1, "SM_Number_1_LettersNumbers_Purple.png");
+    add(FactoryMatchAssetIds.CountdownNum2, "SM_Number_2_LettersNumbers_Purple.png");
+    add(FactoryMatchAssetIds.CountdownNum3, "SM_Number_3_LettersNumbers_Purple.png");
     this.assetManager.loadAll(this._assetRequestList.getRequests());
   }
 

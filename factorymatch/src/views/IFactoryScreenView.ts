@@ -12,4 +12,6 @@ export interface IFactoryScreenView extends IScreenView {
   pulseGoal(index: number): void;
   showResult(result: GameResult): void;
   hideBanner(): void;
+  /** Play the 3-2-1-Go intro, calling `onDone` when it finishes. */
+  playCountdown(onDone: () => void): void;
 }
