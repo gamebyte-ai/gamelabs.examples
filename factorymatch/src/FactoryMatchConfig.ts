@@ -86,6 +86,13 @@ export class FactoryMatchConfig {
     shiftStagger: 0.05, // delay between consecutive items' reorder hops (seconds) — 0 = all hop together
   };
 
+  /** Continuous ribbon trail behind a collected item as it flies to the tray.
+   * `points` is the trail LENGTH (how many recent positions it spans — bigger =
+   * longer tail); `width` its world-space thickness; `color`/`opacity` its look.
+   * After the item lands, the tail catches up to the head over `fade` seconds, so
+   * the ribbon vanishes from its origin toward the item (not a whole-strip fade). */
+  public readonly trail = { enabled: true, color: 0xffffff, width: 0.1, points: 6, opacity: 0.9, fade: 0.18 };
+
   public readonly kinds: Record<Kind, KindDef> = {
     dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
     billardball: { color: 0x1a1a1a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },

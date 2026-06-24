@@ -5,6 +5,7 @@ import type { BodyId, Physics3DEntityView } from "@gamebyte/gamelabsjs/physics3d
 import type { IPileView } from "./IPileView.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
 import { ModelLibraryService } from "../services/ModelLibraryService.js";
+import { TrailRibbon } from "./TrailRibbon.three.js";
 import type { CollectResult } from "../utilities/FactoryOperations.js";
 import type { Kind } from "../models/IGameModel.js";
 
@@ -52,6 +53,8 @@ export class PileView extends WorldViewBase implements IPileView {
   private readonly _outlineParts: THREE.Mesh[] = [];
   /** True while a non-mouse pointer is held down (touch/pen). */
   private _pressActive = false;
+  /** Gates the hover/press outline — off until play starts, off again at game over. */
+  private _interactive = false;
 
   /** Slotted (collected) shapes by item id, plus their display order. */
   private readonly _slots = new Map<number, SlotMesh>();
@@ -61,6 +64,9 @@ export class PileView extends WorldViewBase implements IPileView {
   private _padRestY = 0;
   /** Pending post-match delayed callbacks, killed on reset so a stale one can't pop a fresh item. */
   private readonly _pending = new Set<gsap.core.Tween>();
+  /** Live comet-trail ribbons + the per-fly tweens that drive them. */
+  private readonly _trails = new Set<TrailRibbon>();
+  private readonly _trailTweens = new Set<gsap.core.Tween>();
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -195,6 +201,7 @@ export class PileView extends WorldViewBase implements IPileView {
   public clearSlots(): void {
     for (const call of this._pending) call.kill();
     this._pending.clear();
+    this._clearTrails();
     for (const { obj } of this._slots.values()) {
       gsap.killTweensOf(obj.position);
       gsap.killTweensOf(obj.scale);
@@ -254,6 +261,7 @@ export class PileView extends WorldViewBase implements IPileView {
           ease: "power2.out",
           overwrite: true,
         });
+        this._startTrail(slot.obj, landTime);
       } else {
         // Seated neighbours hop only when their SLOT actually changes. Comparing
         // the target index (not the live position) means an item already settled
@@ -376,6 +384,41 @@ export class PileView extends WorldViewBase implements IPileView {
     });
   }
 
+  /** Trail a continuous ribbon behind the item along its flight to the tray, then
+   * fade the whole strip out once it lands. */
+  private _startTrail(obj: THREE.Object3D, duration: number): void {
+    const cfg = this._config!.trail;
+    const camera = this._world?.activeCamera;
+    if (!cfg.enabled || !camera) return;
+    const camDir = camera.getWorldDirection(new THREE.Vector3());
+    const ribbon = new TrailRibbon(this, cfg.color, cfg.width, cfg.opacity, cfg.points, camDir);
+    this._trails.add(ribbon);
+
+    const driver = { t: 0 };
+    const tween = gsap.to(driver, {
+      t: 1,
+      duration,
+      ease: "none",
+      onUpdate: () => ribbon.push(obj.position),
+      onComplete: () => {
+        this._trailTweens.delete(tween);
+        ribbon.dissolve(cfg.fade, () => {
+          this._trails.delete(ribbon);
+          ribbon.dispose();
+        });
+      },
+    });
+    this._trailTweens.add(tween);
+  }
+
+  /** Kill any live trails (driver tweens + ribbons) — on reset and teardown. */
+  private _clearTrails(): void {
+    for (const tween of this._trailTweens) tween.kill();
+    this._trailTweens.clear();
+    for (const ribbon of this._trails) ribbon.dispose();
+    this._trails.clear();
+  }
+
   private _slotPosition(index: number): { x: number; y: number; z: number } {
     const cfg = this._config!;
     const cap = cfg.slots.capacity;
@@ -413,6 +456,7 @@ export class PileView extends WorldViewBase implements IPileView {
 
   /** Mouse: outline whatever shape is under the cursor. Touch: track the held finger. */
   private readonly _onPointerMove = (event: PointerEvent): void => {
+    if (!this._interactive) return; // no hover before play starts / after it ends
     if (event.pointerType === "mouse") {
       this._setHover(this._pickPileObject(event));
     } else if (this._pressActive) {
@@ -458,12 +502,19 @@ export class PileView extends WorldViewBase implements IPileView {
     return null;
   }
 
+  /** Enable/disable the selection outline; disabling clears any current one. */
+  public setInteractive(enabled: boolean): void {
+    this._interactive = enabled;
+    if (!enabled) this._setHover(null);
+  }
+
   /** Swap the outlined shape (no-op if unchanged). Pass null to clear. */
   private _setHover(obj: THREE.Object3D | null): void {
-    if (obj === this._hovered) return;
+    const next = this._interactive ? obj : null; // no outline while non-interactive
+    if (next === this._hovered) return;
     this._clearOutline();
-    this._hovered = obj;
-    if (obj) this._applyOutline(obj);
+    this._hovered = next;
+    if (next) this._applyOutline(next);
   }
 
   /**

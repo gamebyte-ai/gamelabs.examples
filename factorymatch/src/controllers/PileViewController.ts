@@ -42,8 +42,19 @@ export class PileViewController implements IViewController<IPileView> {
     this._ops!.bindView((kind) => view.createEntity(kind));
 
     this._subs.add(view.onPick((bodyId) => this._onPick(bodyId)));
-    // The HUD intro countdown fires this when it finishes; play begins then.
-    this._subs.add(this._events!.onStarted(() => this._ops!.start()));
+    // The HUD intro countdown fires this when it finishes; play begins then and
+    // the selection outline turns on. It turns off again at game over.
+    this._subs.add(
+      this._events!.onStarted(() => {
+        this._ops!.start();
+        view.setInteractive(true);
+      }),
+    );
+    this._subs.add(
+      this._events!.onStatusChanged((status) => {
+        if (status !== "playing") view.setInteractive(false);
+      }),
+    );
     this._updateUnsub = this._updateManager!.register((dt) => this._onUpdate(dt));
 
     this._ops!.buildLevel();

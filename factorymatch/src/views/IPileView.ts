@@ -20,4 +20,8 @@ export interface IPileView extends IView {
 
   /** A pointer click: the picked pile body id, or null if none was under the pointer. */
   onPick(cb: (bodyId: number | null) => void): Unsubscribe;
+
+  /** Enable/disable the hover/press selection outline (off during the countdown
+   * and after game over; on while playing). */
+  setInteractive(enabled: boolean): void;
 }
