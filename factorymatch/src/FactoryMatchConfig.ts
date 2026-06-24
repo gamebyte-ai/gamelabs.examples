@@ -206,8 +206,8 @@ export class FactoryMatchConfig {
    * centre it on the icon's visible circle (the art's circle sits high in its
    * texture, above the drop shadow — negative = up; tune this to taste). */
   public readonly boosters = {
-    fanMatchCount: 8, // matches to charge the fan booster
-    springMatchCount: 6, // matches to charge the spring booster
+    fanMatchCount: 7, // matches to charge the fan booster
+    springMatchCount: 5, // matches to charge the spring booster
     fanColor: 0xc82fff,
     springColor: 0x2cb8ff,
     ringRadiusScale: 0.43, // ring radius as a fraction of the booster design height
@@ -265,6 +265,7 @@ export class FactoryMatchConfig {
     jumpRatio: 0.4, // fraction of flyTime the block springs STRAIGHT UP before it travels to the pool (0 = no jump, just a flat arc)
     padJump: 0.6, // how high the vacated tray pad springs UP (world units) as it launches the block — the catapult recoil
     padJumpTime: 0.18, // duration of the pad's spring up (and, symmetrically, its settle back) in seconds
+    pickLock: 0.7, // seconds the returned item can't be re-picked after it spawns, so it must drop into the pool before it's clickable again
   };
 
   /** Countdown clock shown top-centre. `startSeconds` is the time the player has;
@@ -275,9 +276,9 @@ export class FactoryMatchConfig {
    * `target` is the displayed count. Placeholder wiring — goal art + completion
    * rules come later; for now they render their bg + count text. */
   public readonly goals: { kind: Kind; target: number }[] = [
-    { kind: "dice", target: 18 },
-    { kind: "radio", target: 18 },
-    { kind: "billardball", target: 18 },
+    { kind: "dice", target: 3 },
+    { kind: "radio", target: 3 },
+    { kind: "billardball", target: 3 },
   ];
 
   /** HUD layout (screen pixels). `topY` is the timer + score row centre; `goalsY`
@@ -294,6 +295,9 @@ export class FactoryMatchConfig {
     goalIconY: -14,
     goalPulseScale: 1.2, // peak scale of a goal chip's pop when its count ticks down
     goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
+    goalDoneTick: "✓", // shown in place of the count once a goal is fully collected
+    goalDoneTickColor: 0x4cd964, // green tick colour
+    goalDoneBgTint: 0x5e6b7a, // a completed goal's bg + item icon are tinted to this muted colour (full opacity)
     boosterScale: 0.18, // bottom booster icon height as a fraction of the game-screen width (scales with screen size)
     bannerScale: 0.82, // end-of-game banner width as a fraction of the game-screen width (scales with screen size)
     timerWarnSeconds: 10, // the timer turns red + blinks once this many seconds remain

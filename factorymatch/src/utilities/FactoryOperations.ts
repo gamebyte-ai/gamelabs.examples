@@ -54,6 +54,9 @@ export class FactoryOperations {
 
   /** Pickable pile bodies → kind. */
   private readonly _pile = new Map<BodyId, Kind>();
+  /** Spring-returned bodies still dropping into the pool → seconds until pickable
+   * again (they can't be re-collected mid-air, only once they've entered the pool). */
+  private readonly _pickLock = new Map<BodyId, number>();
   /** Static bin collider bodies (no meshes — the view draws the glass bin). */
   private _binIds: BodyId[] = [];
   /** Logical slot contents, by unique item id. */
@@ -101,6 +104,7 @@ export class FactoryOperations {
     this._binIds = [];
     this._stage!.clear();
     this._pile.clear();
+    this._pickLock.clear();
     this._slots = [];
     this._nextItemId = 1;
     this._model!.reset();
@@ -239,6 +243,7 @@ export class FactoryOperations {
     const id = this._spawnBody(kind, x, y, z);
     const kick = (): number => (Math.random() * 2 - 1) * s.throwKick;
     this._physics!.setVelocity(id, kick(), -s.throwSpeed, kick());
+    this._pickLock.set(id, s.pickLock); // not re-pickable until it has dropped into the pool
     this._settle = Math.max(this._settle, s.settle); // let it crash in + the pile resettle
   }
 
@@ -280,6 +285,7 @@ export class FactoryOperations {
     if (this._pickCooldown > 0) return null; // wait out the post-pick delay
     const kind = this._pile.get(bodyId);
     if (kind === undefined) return null; // already collected / not a pile body
+    if (this._pickLock.has(bodyId)) return null; // spring-returned, still dropping into the pool
 
     const cfg = this._config!;
 
@@ -296,7 +302,9 @@ export class FactoryOperations {
     const from = { x: t.x, y: t.y, z: t.z };
     this._stage!.despawn(bodyId); // collider off — the shape leaves the simulation
     this._pile.delete(bodyId);
-    this._settle = cfg.physics.settleSeconds; // wake the pile so it resettles into the gap, then freeze
+    // Wake the pile so it resettles into the gap — but never SHORTEN an active
+    // window (e.g. a running fan swirl needs its full duration), so use max.
+    this._settle = Math.max(this._settle, cfg.physics.settleSeconds);
     this._pickCooldown = cfg.pickCooldown; // block the next pick briefly
 
     const addedId = this._nextItemId++;
@@ -325,10 +333,10 @@ export class FactoryOperations {
       this._chargeBoosters();
     }
 
-    // Win on an empty pile; otherwise the tray filling up loses — UNLESS a charged
-    // spring can rescue, in which case defer the loss and prompt the player to use
-    // the spring (the controller pulses its icon).
-    if (this._pile.size === 0) {
+    // Win once every goal is met (all goal items collected); otherwise the tray
+    // filling up loses — UNLESS a charged spring can rescue, in which case defer
+    // the loss and prompt the player to use the spring (the controller pulses it).
+    if (this._goalRemaining.every((r) => r <= 0)) {
       this._model!.setStatus("won");
     } else if (this._slots.length >= cfg.slots.capacity) {
       if (this._springCharge >= cfg.boosters.springMatchCount) this._springPromptPending = true;
@@ -419,6 +427,12 @@ export class FactoryOperations {
     this._stage!.sync();
     if (this._settle > 0) this._settle = Math.max(0, this._settle - dt); // burn down the physics-on window
     if (this._pickCooldown > 0) this._pickCooldown = Math.max(0, this._pickCooldown - dt); // burn down the pick cooldown
+    // Burn down per-body re-pick locks (spring-returned items dropping in); unlock at zero.
+    for (const [id, left] of this._pickLock) {
+      const next = left - dt;
+      if (next <= 0) this._pickLock.delete(id);
+      else this._pickLock.set(id, next);
+    }
     // The clock only runs once play has begun (after the intro countdown) and
     // while playing; hitting zero ends the game.
     if (!this._model!.started || this._model!.status !== "playing") return;

@@ -51,6 +51,8 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _comboRing = new PIXI.Graphics();
   private readonly _goals: PIXI.Container[] = [];
   private readonly _goalValues: PIXI.Text[] = [];
+  private readonly _goalBgs: (PIXI.Sprite | null)[] = [];
+  private readonly _goalIcons: (PIXI.Sprite | null)[] = [];
   private readonly _boosterFan = new PIXI.Sprite();
   private readonly _boosterSpring = new PIXI.Sprite();
   private readonly _fanRing = new PIXI.Graphics();
@@ -100,17 +102,20 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     for (const goal of this._config!.goals) {
       const chip = new PIXI.Container();
       const value = this._makeText(this._config!.hud.goalFontSize, 0xe8eef6, "800");
-      this._buildBadge(chip, value, FactoryMatchAssetIds.GoalBg, GOAL_H);
+      const bg = this._buildBadge(chip, value, FactoryMatchAssetIds.GoalBg, GOAL_H);
+      this._goalBgs.push(bg);
       // Item icon fills the upper-centre; the count sits near the bottom.
       const iconId = GOAL_ICON_BY_KIND[goal.kind];
       const iconTex = iconId ? this.assetLoader.getAsset<PIXI.Texture>(iconId) : undefined;
+      let icon: PIXI.Sprite | null = null;
       if (iconTex) {
-        const icon = new PIXI.Sprite(iconTex);
+        icon = new PIXI.Sprite(iconTex);
         icon.anchor.set(0.5);
         icon.scale.set(this._config!.hud.goalIconH / iconTex.height);
         icon.position.set(0, this._config!.hud.goalIconY);
         chip.addChild(icon);
       }
+      this._goalIcons.push(icon);
       value.text = String(goal.target);
       value.position.set(0, this._config!.hud.goalTextY);
       this._goals.push(chip);
@@ -191,7 +196,19 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
 
   public setGoal(index: number, count: number): void {
     const value = this._goalValues[index];
-    if (value) value.text = String(count);
+    const hud = this._config!.hud;
+    const done = count <= 0;
+    if (value) {
+      value.text = done ? hud.goalDoneTick : String(count); // green tick once complete
+      value.style.fill = done ? hud.goalDoneTickColor : 0xe8eef6;
+    }
+    // Mute the whole goal section — bg + item icon — to the same colour when done
+    // (the green tick stays as the only bright element).
+    const tint = done ? hud.goalDoneBgTint : 0xffffff;
+    const bg = this._goalBgs[index];
+    if (bg) bg.tint = tint;
+    const icon = this._goalIcons[index];
+    if (icon) icon.tint = tint;
   }
 
   /** Pop the goal chip (scale up, then settle back) to acknowledge a collection. */
@@ -468,17 +485,20 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     sprite.scale.set(designH / texture.height);
   }
 
-  /** Build a centred bg sprite (scaled to `targetH`) with a centred value label. */
-  private _buildBadge(root: PIXI.Container, value: PIXI.Text, id: FactoryMatchAssetIds, targetH: number): void {
+  /** Build a centred bg sprite (scaled to `targetH`) with a centred value label.
+   * Returns the bg sprite (or null if its texture is missing). */
+  private _buildBadge(root: PIXI.Container, value: PIXI.Text, id: FactoryMatchAssetIds, targetH: number): PIXI.Sprite | null {
     const texture = this.assetLoader.getAsset<PIXI.Texture>(id);
+    let sprite: PIXI.Sprite | null = null;
     if (texture) {
-      const sprite = new PIXI.Sprite(texture);
+      sprite = new PIXI.Sprite(texture);
       sprite.anchor.set(0.5);
       sprite.scale.set(targetH / texture.height);
       root.addChild(sprite);
     }
     value.anchor.set(0.5);
     root.addChild(value);
+    return sprite;
   }
 
   private _makeText(fontSize: number, fill: number, fontWeight: PIXI.TextStyleFontWeight): PIXI.Text {
