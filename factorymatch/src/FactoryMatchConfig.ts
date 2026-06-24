@@ -37,8 +37,8 @@ export class FactoryMatchConfig {
   /** Static bin the shapes pile up in. `transparent` hides the floor + glass
    * walls so the pile floats on the background (the colliders are unaffected). */
   public readonly bin = {
-    halfWidth: 1.4, // play-area half-extent in x (pool width = halfWidth * 2)
-    halfDepth: 1.4, // play-area half-extent in z (pool depth = halfDepth * 2)
+    halfWidth: 1.6, // play-area half-extent in x (pool width = halfWidth * 2)
+    halfDepth: 1.6, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
     wallHeight: 11.0, // visible glass-wall height
@@ -68,7 +68,7 @@ export class FactoryMatchConfig {
     matchGrow: 1.5, // peak scale of a matched shape during the rise, as a multiple of itemScale
     // Tray sizing (world units). Slot pitch = padWidth + gap; the full row spans
     // (capacity-1)*(padWidth+gap) + padWidth, which must fit the portrait width
-    // (ortho width ≈ frustumHeight * viewport-aspect, ~3.3–4.0 in portrait).
+    // (ortho width ≈ camera.zoom frustum height * viewport-aspect, ~3.3–4.0 in portrait).
     padWidth: 0.39, // block width in x
     gap: 0.06, // empty space between adjacent blocks
     padDepth: 0.4, // pad size in z (world units)
@@ -124,9 +124,9 @@ export class FactoryMatchConfig {
    * matchCount → fully clearable). */
   public readonly spawnPerKind: Record<Kind, number> = {
     dice: 18,
-    billardball: 18,
+    billardball: 24,
     guitar: 27,
-    radio: 18,
+    radio: 24,
     gascan: 33,
   };
   /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
@@ -190,6 +190,29 @@ export class FactoryMatchConfig {
     trackColor: 0x1c2430, // faint full-circle track behind the fill
     trackAlpha: 0.55,
     palette: [0x49d17a, 0x3fa9f5, 0xb061f0, 0xff9f43, 0xff5b5b], // per-level colour cycle
+  };
+
+  /** Per-booster charge ring. Each match fills BOTH boosters by one; a booster
+   * becomes usable once it reaches its own `matchCount` (no decay, no timer — the
+   * charge only ever goes up, then resets to 0 when the booster is used). The ring
+   * around each icon shows charge/matchCount in the booster's colour; the icon
+   * swaps to its active art once full (passive while charging). `ringRadiusScale`
+   * is the radius as a fraction of the booster's on-screen design height (tracks
+   * `hud.boosterScale`). `ringOffsetY` nudges the ring vertically in design px to
+   * centre it on the icon's visible circle (the art's circle sits high in its
+   * texture, above the drop shadow — negative = up; tune this to taste). */
+  public readonly boosters = {
+    fanMatchCount: 8, // matches to charge the fan booster
+    springMatchCount: 6, // matches to charge the spring booster
+    fanColor: 0xc82fff,
+    springColor: 0x2cb8ff,
+    ringRadiusScale: 0.43, // ring radius as a fraction of the booster design height
+    ringOffsetY: -2, // vertical position nudge of the ring (design px; negative = up)
+    activeIconOffsetY: -2, // vertical nudge of the ACTIVE icon art only (design px; negative = up) — corrects active art that sits lower in its frame than the passive
+    ringWidth: 8,
+    startAngle: -90, // 12 o'clock; fills clockwise
+    trackColor: 0x1c2430,
+    trackAlpha: 0.55,
   };
 
   /** Minimum delay between picks (seconds): after collecting an item, further
@@ -271,14 +294,27 @@ export class FactoryMatchConfig {
 
   /** Fixed 3D camera looking down into the bin.
    * `orthographic` swaps the perspective camera for an isometric-style parallel
-   * projection (no perspective convergence). `frustumHeight` is the vertical
-   * world-space extent the camera shows — smaller = more zoomed in. Width is
-   * derived from the viewport aspect, so portrait framing stays consistent. */
+   * projection (no perspective convergence). The vertical world-space extent the
+   * camera shows (its frustum height — smaller = more zoomed in) is responsive:
+   * it's chosen from the viewport aspect (width / height) via `zoom`, while the
+   * frustum width always follows the true aspect so nothing is stretched.
+   *
+   * `zoom`: between `minAspect` (narrow) and `maxAspect` (wide) the frustum height
+   * lerps from `frustumAtMin` to `frustumAtMax` — a small zoom that keeps the pool
+   * + tray framed at the screen edges across phone shapes. Outside the band it's
+   * pinned: wider than `maxAspect` stays at `frustumAtMax`, narrower than
+   * `minAspect` stays at `frustumAtMin`. Narrow screens want a TALLER frustum to
+   * fit the pool width, so `frustumAtMin` is usually larger than `frustumAtMax`. */
   public readonly camera = {
     position: { x: 0, y: 28.6, z: 2.2 },
     lookAt: { x: 0, y: 0.85, z: 0.1 },
     orthographic: true,
-    frustumHeight: 7.2,
+    zoom: {
+      minAspect: 0.4, // width/height at the narrow end of the band
+      maxAspect: 0.5, // width/height at the wide end of the band
+      frustumAtMin: 7.8, // frustum height at minAspect (narrow → zoomed out a touch)
+      frustumAtMax: 6.7, // frustum height at maxAspect (wide → zoomed in a touch)
+    },
   };
 
   /** Selection silhouette shown while a pile shape is hovered (mouse) or pressed

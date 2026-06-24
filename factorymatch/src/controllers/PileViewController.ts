@@ -31,6 +31,8 @@ export class PileViewController implements IViewController<IPileView> {
   private _lastStatus: GameStatus | null = null;
   private _lastComboLevel = -1;
   private _lastComboFill = -1;
+  private _lastFanFill = -1;
+  private _lastSpringFill = -1;
 
   public inject(resolver: IInstanceResolver): void {
     this._model = resolver.getInstance(IGameModel);
@@ -103,6 +105,14 @@ export class PileViewController implements IViewController<IPileView> {
       this._lastComboLevel = level;
       this._lastComboFill = fill;
       this._events!.emitComboChanged(level, fill);
+    }
+    // Booster charges only change on a match, so this stays quiet between matches.
+    const fanFill = this._ops!.fanFill;
+    const springFill = this._ops!.springFill;
+    if (fanFill !== this._lastFanFill || springFill !== this._lastSpringFill) {
+      this._lastFanFill = fanFill;
+      this._lastSpringFill = springFill;
+      this._events!.emitBoosterChanged(fanFill, springFill);
     }
   }
 

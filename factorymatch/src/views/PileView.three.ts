@@ -123,14 +123,20 @@ export class PileView extends WorldViewBase implements IPileView {
     cam.lookAt(l.x, l.y, l.z);
   }
 
-  /** Keep the ortho frustum matched to the viewport: vertical extent is fixed by
-   * `frustumHeight`, horizontal follows the aspect (portrait framing stays put). */
+  /** Keep the ortho frustum matched to the viewport: the vertical extent zooms
+   * with the aspect (clamped + lerped per `camera.zoom`) so the pool + tray stay
+   * framed at the screen edges, while the horizontal extent follows the true
+   * aspect so nothing is stretched. */
   public override onResize(width: number, height: number, _dpr: number): void {
     super.onResize(width, height, _dpr);
     const ortho = this._ortho;
     if (!ortho || width === 0 || height === 0) return;
-    const h = this._config!.camera.frustumHeight;
-    const w = h * (width / height);
+    const aspect = width / height;
+    const z = this._config!.camera.zoom;
+    const span = z.maxAspect - z.minAspect;
+    const t = span > 0 ? Math.max(0, Math.min(1, (aspect - z.minAspect) / span)) : 0; // clamp into the band
+    const h = z.frustumAtMin + (z.frustumAtMax - z.frustumAtMin) * t;
+    const w = h * aspect;
     ortho.left = -w / 2;
     ortho.right = w / 2;
     ortho.top = h / 2;

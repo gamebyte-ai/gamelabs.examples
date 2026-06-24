@@ -16,9 +16,11 @@ export enum FactoryMatchAssetIds {
   GoalIconDice = "FactoryMatch.GoalIconDice",
   GoalIconRadio = "FactoryMatch.GoalIconRadio",
   GoalIconBillard = "FactoryMatch.GoalIconBillard",
-  // Bottom-bar booster buttons.
+  // Bottom-bar booster buttons (passive = charging, active = usable).
   BoosterFan = "FactoryMatch.BoosterFan",
+  BoosterFanActive = "FactoryMatch.BoosterFanActive",
   BoosterSpring = "FactoryMatch.BoosterSpring",
+  BoosterSpringActive = "FactoryMatch.BoosterSpringActive",
   // Start-of-game countdown numbers (3, 2, 1).
   CountdownNum1 = "FactoryMatch.CountdownNum1",
   CountdownNum2 = "FactoryMatch.CountdownNum2",

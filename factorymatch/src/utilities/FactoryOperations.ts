@@ -73,6 +73,10 @@ export class FactoryOperations {
    * fill and multiplies match points; the fill drains every frame. */
   private _comboLevel = 1;
   private _comboFill = 0;
+  /** Per-booster charge in matches (capped at its matchCount). Each match charges
+   * both; a booster is usable at full charge, then resets to 0 when used. */
+  private _fanCharge = 0;
+  private _springCharge = 0;
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
 
   public inject(resolver: IInstanceResolver): void {
@@ -102,6 +106,8 @@ export class FactoryOperations {
     this._goalRemaining = this._config!.goals.map((g) => g.target);
     this._comboLevel = 1;
     this._comboFill = 0;
+    this._fanCharge = 0;
+    this._springCharge = 0;
 
     this._buildBin();
     this._buildPile();
@@ -202,8 +208,10 @@ export class FactoryOperations {
    * kind + target, or null if the tray is empty / not in play. */
   public returnLastItem(): { id: number; kind: Kind; x: number; y: number; z: number } | null {
     if (!this._model!.started || this._model!.status !== "playing") return null;
+    if (this._springCharge < this._config!.boosters.springMatchCount) return null; // not charged yet
     const item = this._slots.pop(); // last collected still in the tray
-    if (!item) return null;
+    if (!item) return null; // tray empty — keep the charge for when there's something to throw
+    this._springCharge = 0; // consume the charge
     const cfg = this._config!;
     const s = cfg.spring;
     const c = cfg.kinds[item.kind].collider;
@@ -233,6 +241,8 @@ export class FactoryOperations {
   /** Fan booster: spin the pile into a clockwise tornado for a few seconds. */
   public activateFan(): void {
     if (!this._model!.started || this._model!.status !== "playing") return;
+    if (this._fanCharge < this._config!.boosters.fanMatchCount) return; // not charged yet
+    this._fanCharge = 0; // consume the charge
     const fan = this._config!.fan;
     this._swirl = fan.duration;
     // Keep the pile simulated through the swirl AND a settle-out window after it.
@@ -299,6 +309,7 @@ export class FactoryOperations {
       // match feeds the combo ring (which may bump the level for the next match).
       this._model!.setScore(this._model!.score + cfg.slots.matchPoints * this._comboLevel);
       this._addCombo();
+      this._chargeBoosters();
     }
 
     // Win on an empty pile; otherwise lose the moment the tray fills with no room
@@ -344,6 +355,24 @@ export class FactoryOperations {
         break;
       }
     }
+  }
+
+  //  BOOSTER CHARGE
+
+  /** Fan booster charge fill (0→1). */
+  public get fanFill(): number {
+    return Math.min(1, this._fanCharge / this._config!.boosters.fanMatchCount);
+  }
+  /** Spring booster charge fill (0→1). */
+  public get springFill(): number {
+    return Math.min(1, this._springCharge / this._config!.boosters.springMatchCount);
+  }
+
+  /** A match charges both boosters by one match, each capped at its own count. */
+  private _chargeBoosters(): void {
+    const b = this._config!.boosters;
+    this._fanCharge = Math.min(b.fanMatchCount, this._fanCharge + 1);
+    this._springCharge = Math.min(b.springMatchCount, this._springCharge + 1);
   }
 
   //  PER-FRAME / LIFECYCLE

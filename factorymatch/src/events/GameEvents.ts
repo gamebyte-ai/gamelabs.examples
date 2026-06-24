@@ -11,6 +11,7 @@ export class GameEvents {
   private readonly _statusChanged = new Set<(status: GameStatus) => void>();
   private readonly _goalChanged = new Set<(index: number, remaining: number) => void>();
   private readonly _comboChanged = new Set<(level: number, fill: number) => void>();
+  private readonly _boosterChanged = new Set<(fanFill: number, springFill: number) => void>();
   private readonly _started = new Set<() => void>();
   private readonly _fanActivated = new Set<() => void>();
   private readonly _springActivated = new Set<() => void>();
@@ -46,6 +47,15 @@ export class GameEvents {
   }
   public emitComboChanged(level: number, fill: number): void {
     for (const cb of this._comboChanged) cb(level, fill);
+  }
+
+  /** Fired when either booster's charge (0→1 fill) changes. */
+  public onBoosterChanged(cb: (fanFill: number, springFill: number) => void): Unsubscribe {
+    this._boosterChanged.add(cb);
+    return () => this._boosterChanged.delete(cb);
+  }
+  public emitBoosterChanged(fanFill: number, springFill: number): void {
+    for (const cb of this._boosterChanged) cb(fanFill, springFill);
   }
 
   /** Fired when the intro countdown finishes — play should begin. */

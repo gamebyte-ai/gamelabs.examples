@@ -53,6 +53,8 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _goalValues: PIXI.Text[] = [];
   private readonly _boosterFan = new PIXI.Sprite();
   private readonly _boosterSpring = new PIXI.Sprite();
+  private readonly _fanRing = new PIXI.Graphics();
+  private readonly _springRing = new PIXI.Graphics();
   private readonly _fanListeners = new Set<() => void>();
   private readonly _springListeners = new Set<() => void>();
 
@@ -63,6 +65,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _goNode = new PIXI.Container();
   private _goText: PIXI.Text | null = null;
   private _countdownTl: gsap.core.Timeline | null = null;
+  private _boosterDesignH = 1; // booster icon design height, for rescaling on texture swap
   private _w = 1;
   private _h = 1;
 
@@ -116,9 +119,10 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     // Boosters are built at design size (px @ refWidth); _bottomBar's scale makes
     // them responsive — height ends up gameWidth * hud.boosterScale on screen.
     const boosterH = this._config!.gameScreen.refWidth * this._config!.hud.boosterScale;
+    this._boosterDesignH = boosterH;
     this._initBooster(this._boosterFan, FactoryMatchAssetIds.BoosterFan, boosterH);
     this._initBooster(this._boosterSpring, FactoryMatchAssetIds.BoosterSpring, boosterH);
-    this._bottomBar.addChild(this._boosterFan, this._boosterSpring);
+    this._bottomBar.addChild(this._fanRing, this._springRing, this._boosterFan, this._boosterSpring);
 
     // The booster buttons are tappable; other UI stays pass-through.
     this._boosterFan.eventMode = "static";
@@ -133,6 +137,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     });
 
     this._layoutDesign();
+    this.setBoosterCharge(0, 0);
 
     this._banner.anchor.set(0.5);
     this._banner.visible = false;
@@ -190,16 +195,63 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._multiplierValue.text = "x" + level;
     const c = this._config!.combo;
     const color = c.palette[(level - 1) % c.palette.length] ?? c.palette[0]!;
-    const g = this._comboRing;
+    this._drawRing(this._comboRing, c.ringRadius, c.ringWidth, fill, color, c.trackColor, c.trackAlpha, c.startAngle);
+  }
+
+  /** Draw both booster charge rings and swap each icon to its active art once its
+   * ring is full (passive while still charging). */
+  public setBoosterCharge(fanFill: number, springFill: number): void {
+    const b = this._config!.boosters;
+    const draw = (
+      g: PIXI.Graphics,
+      icon: PIXI.Sprite,
+      fill: number,
+      color: number,
+      passiveId: FactoryMatchAssetIds,
+      activeId: FactoryMatchAssetIds,
+    ): void => {
+      const charged = fill >= 1;
+      this._applyBoosterTexture(icon, charged ? activeId : passiveId);
+      // The active art sits lower in its frame than the passive — nudge only it.
+      icon.y = -BOOSTER_BOTTOM + (charged ? b.activeIconOffsetY : 0);
+      const radius = this._boosterDesignH * b.ringRadiusScale; // independent of the padded texture
+      this._drawRing(g, radius, b.ringWidth, fill, color, b.trackColor, b.trackAlpha, b.startAngle);
+    };
+    const ids = FactoryMatchAssetIds;
+    draw(this._fanRing, this._boosterFan, fanFill, b.fanColor, ids.BoosterFan, ids.BoosterFanActive);
+    draw(this._springRing, this._boosterSpring, springFill, b.springColor, ids.BoosterSpring, ids.BoosterSpringActive);
+  }
+
+  /** Swap a booster icon's texture (no-op if unchanged), rescaling to its design
+   * height so passive/active art of any size stays the same on-screen size. */
+  private _applyBoosterTexture(sprite: PIXI.Sprite, id: FactoryMatchAssetIds): void {
+    const tex = this.assetLoader.getAsset<PIXI.Texture>(id);
+    if (!tex || sprite.texture === tex) return;
+    sprite.texture = tex;
+    sprite.scale.set(this._boosterDesignH / tex.height);
+  }
+
+  /** A progress ring centred at the graphics' origin: a faint full-circle track
+   * plus a fill arc that sweeps clockwise from `startAngleDeg`. */
+  private _drawRing(
+    g: PIXI.Graphics,
+    radius: number,
+    width: number,
+    fill: number,
+    color: number,
+    trackColor: number,
+    trackAlpha: number,
+    startAngleDeg: number,
+  ): void {
     g.clear();
-    g.circle(0, 0, c.ringRadius).stroke({ width: c.ringWidth, color: c.trackColor, alpha: c.trackAlpha });
+    g.circle(0, 0, radius).stroke({ width, color: trackColor, alpha: trackAlpha });
     if (fill > 0) {
-      const start = (c.startAngle * Math.PI) / 180;
+      const start = (startAngleDeg * Math.PI) / 180;
       const end = start + Math.min(fill, 1) * Math.PI * 2; // y-down → increasing angle sweeps clockwise
       // moveTo the arc's start first, or the path draws a spoke from the centre to it.
-      g.moveTo(Math.cos(start) * c.ringRadius, Math.sin(start) * c.ringRadius);
-      g.arc(0, 0, c.ringRadius, start, end);
-      g.stroke({ width: c.ringWidth, color, alpha: 1, cap: "round" });
+      g.moveTo(Math.cos(start) * radius, Math.sin(start) * radius);
+      g.arc(0, 0, radius, start, end);
+      g.stroke({ width, color, alpha: 1, cap: "round" });
     }
   }
 
@@ -325,6 +377,11 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     const boosterHalf = (this._boosterFan.width + this._boosterFan.height * BOOSTER_GAP_FRACTION) / 2;
     this._boosterFan.position.set(-boosterHalf, -BOOSTER_BOTTOM);
     this._boosterSpring.position.set(boosterHalf, -BOOSTER_BOTTOM);
+    // Charge rings sit at each booster's centre, nudged up onto the visible circle
+    // (the art's circle sits above its drop shadow, so the sprite centre is low).
+    const offY = cfg.boosters.ringOffsetY;
+    this._fanRing.position.set(this._boosterFan.position.x, this._boosterFan.position.y + offY);
+    this._springRing.position.set(this._boosterSpring.position.x, this._boosterSpring.position.y + offY);
   }
 
   /** Centred game-screen column width (capped to gameScreen.maxAspect). */
