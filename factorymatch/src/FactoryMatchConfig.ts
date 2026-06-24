@@ -41,7 +41,7 @@ export class FactoryMatchConfig {
     halfDepth: 1.6, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
-    wallHeight: 11.0, // visible glass-wall height
+    wallHeight: 13.0, // visible glass-wall height
     wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.5,
     wallColor: 0x3b4250,
@@ -56,7 +56,7 @@ export class FactoryMatchConfig {
    * BOTH the pads and the seated items, so an item always sits flush on its pad. */
   public readonly rack = {
     z: 2.35,
-    y: 0.32,
+    y: 2.32,
     itemScale: 0.6,
     itemRotationY: 25,
     tiltX: -40,
@@ -87,12 +87,14 @@ export class FactoryMatchConfig {
     shiftStagger: 0.05, // delay between consecutive items' reorder hops (seconds) — 0 = all hop together
   };
 
-  /** Continuous ribbon trail behind a collected item as it flies to the tray.
-   * `points` is the trail LENGTH (how many recent positions it spans — bigger =
-   * longer tail); `width` its world-space thickness; `color`/`opacity` its look.
-   * After the item lands, the tail catches up to the head over `fade` seconds, so
-   * the ribbon vanishes from its origin toward the item (not a whole-strip fade). */
-  public readonly trail = { enabled: true, color: 0xffffff, width: 0.1, points: 6, opacity: 0.8, fade: 0.1 };
+  /** Triangular trail behind a collected item as it flies to the tray. `points`
+   * is the trail LENGTH (how many recent positions it spans — bigger = longer
+   * tail); `width` is the world-space base thickness AT THE ITEM (the two corners
+   * straddling it), tapering to `tipWidth × width` at the tail tip — so `tipWidth`
+   * 0 is a sharp triangle, 1 a uniform ribbon. `color`/`opacity` its look. After
+   * the item lands, the tail catches up to the head over `fade` seconds, so it
+   * vanishes from its origin toward the item (not a whole-strip fade). */
+  public readonly trail = { enabled: true, color: 0xffffff, width: 0.1, tipWidth: 0, points: 6, opacity: 0.8, fade: 0.1 };
 
   public readonly kinds: Record<Kind, KindDef> = {
     dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
@@ -123,11 +125,11 @@ export class FactoryMatchConfig {
   /** How many of each kind to drop into the bin, per kind (keep each a multiple of
    * matchCount → fully clearable). */
   public readonly spawnPerKind: Record<Kind, number> = {
-    dice: 18,
-    billardball: 24,
-    guitar: 27,
-    radio: 24,
-    gascan: 33,
+    dice: 24,
+    billardball: 30,
+    guitar: 30,
+    radio: 33,
+    gascan: 42,
   };
   /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
    * bin (so they spawn together as a compact cloud, not a tall column): `cell` is
@@ -213,6 +215,8 @@ export class FactoryMatchConfig {
     startAngle: -90, // 12 o'clock; fills clockwise
     trackColor: 0x1c2430,
     trackAlpha: 0.55,
+    promptPulseScale: 1.3, // spring icon pops to this × its size when a full tray is rescued (use-me prompt)
+    promptPulseDuration: 0.76, // half-duration of that pop (up, then back) in seconds
   };
 
   /** Minimum delay between picks (seconds): after collecting an item, further

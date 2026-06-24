@@ -12,6 +12,7 @@ export class GameEvents {
   private readonly _goalChanged = new Set<(index: number, remaining: number) => void>();
   private readonly _comboChanged = new Set<(level: number, fill: number) => void>();
   private readonly _boosterChanged = new Set<(fanFill: number, springFill: number) => void>();
+  private readonly _springPrompt = new Set<() => void>();
   private readonly _started = new Set<() => void>();
   private readonly _fanActivated = new Set<() => void>();
   private readonly _springActivated = new Set<() => void>();
@@ -56,6 +57,15 @@ export class GameEvents {
   }
   public emitBoosterChanged(fanFill: number, springFill: number): void {
     for (const cb of this._boosterChanged) cb(fanFill, springFill);
+  }
+
+  /** Fired when a full tray was rescued by a charged spring — prompt its use. */
+  public onSpringPrompt(cb: () => void): Unsubscribe {
+    this._springPrompt.add(cb);
+    return () => this._springPrompt.delete(cb);
+  }
+  public emitSpringPrompt(): void {
+    for (const cb of this._springPrompt) cb();
   }
 
   /** Fired when the intro countdown finishes — play should begin. */

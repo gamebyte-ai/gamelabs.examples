@@ -65,6 +65,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _goNode = new PIXI.Container();
   private _goText: PIXI.Text | null = null;
   private _countdownTl: gsap.core.Timeline | null = null;
+  private _springPulse: gsap.core.Tween | null = null; // looping "use the spring" prompt
   private _boosterDesignH = 1; // booster icon design height, for rescaling on texture swap
   private _w = 1;
   private _h = 1;
@@ -202,6 +203,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
    * ring is full (passive while still charging). */
   public setBoosterCharge(fanFill: number, springFill: number): void {
     const b = this._config!.boosters;
+    if (springFill < 1) this._stopSpringPulse(); // spring spent (or drained) — end the prompt loop
     const draw = (
       g: PIXI.Graphics,
       icon: PIXI.Sprite,
@@ -227,8 +229,44 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private _applyBoosterTexture(sprite: PIXI.Sprite, id: FactoryMatchAssetIds): void {
     const tex = this.assetLoader.getAsset<PIXI.Texture>(id);
     if (!tex || sprite.texture === tex) return;
+    gsap.killTweensOf(sprite.scale); // drop any in-flight prompt pulse before rescaling
     sprite.texture = tex;
     sprite.scale.set(this._boosterDesignH / tex.height);
+  }
+
+  /** Loop the spring booster's scale pulse — the "use me" prompt while a full tray
+   * is held open by a charged spring. Idempotent: a running loop is left alone, so
+   * repeated prompts don't restart it. It stops when the spring is used (the icon
+   * swaps back to passive art, killing the tween) or the game ends. */
+  public pulseSpringBooster(): void {
+    if (this._springPulse?.isActive()) return; // already looping
+    const b = this._config!.boosters;
+    const icon = this._boosterSpring;
+    const ring = this._springRing;
+    const iconRest = this._boosterDesignH / icon.texture.height; // resting icon scale (active art)
+    // Drive both the icon and its ring off one factor so they pulse together (the
+    // ring's geometry is its size, so its resting scale is 1).
+    const driver = { s: 1 };
+    this._springPulse = gsap.to(driver, {
+      s: b.promptPulseScale,
+      duration: b.promptPulseDuration,
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1, // loop until the spring is used / the game ends
+      onUpdate: () => {
+        icon.scale.set(iconRest * driver.s);
+        ring.scale.set(driver.s);
+      },
+    });
+  }
+
+  /** Stop the spring prompt loop and restore the icon + ring resting scales. */
+  private _stopSpringPulse(): void {
+    if (!this._springPulse) return;
+    this._springPulse.kill();
+    this._springPulse = null;
+    this._boosterSpring.scale.set(this._boosterDesignH / this._boosterSpring.texture.height);
+    this._springRing.scale.set(1);
   }
 
   /** A progress ring centred at the graphics' origin: a faint full-circle track
@@ -256,6 +294,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   }
 
   public showResult(result: GameResult): void {
+    this._stopSpringPulse(); // game over — drop any prompt loop
     const texture = this.assetLoader.getAsset<PIXI.Texture>(RESULT_ASSET[result]);
     if (!texture) return;
     this._banner.texture = texture;

@@ -38,6 +38,7 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
     this._subs.add(this._events!.onGoalChanged((i, remaining) => this._onGoalChanged(i, remaining)));
     this._subs.add(this._events!.onComboChanged((level, fill) => view.setCombo(level, fill)));
     this._subs.add(this._events!.onBoosterChanged((fan, spring) => view.setBoosterCharge(fan, spring)));
+    this._subs.add(this._events!.onSpringPrompt(() => view.pulseSpringBooster()));
     this._subs.add(view.onFanTap(() => this._events!.emitFanActivated()));
     this._subs.add(view.onSpringTap(() => this._events!.emitSpringActivated()));
   }

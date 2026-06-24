@@ -5,16 +5,18 @@ import gsap from "gsap";
 export const TRAIL_RENDER_ORDER = 6;
 
 /**
- * A continuous camera-facing ribbon that follows a moving point — a classic comet
- * trail. `push(p)` feeds the head position each frame; the ribbon is the last
- * `maxPoints` positions, rebuilt as one strip whose width offsets are billboarded
- * against the camera so it always reads as a flat streak. Fixed (uniform) colour
- * and opacity — no flicker; `fadeOut` dissolves the whole strip after the flight.
+ * A camera-facing triangular trail that follows a moving point — a comet streak.
+ * `push(p)` feeds the head position each frame; the trail is the last `maxPoints`
+ * positions, rebuilt as one strip whose width offsets are billboarded against the
+ * camera so it always reads flat. The cross-section width tapers from the full
+ * base at the head (two corners straddling the item) down to `tipFactor × base`
+ * at the tail tip, so it draws as a triangle. Fixed colour + opacity — no flicker.
  */
 export class TrailRibbon {
   private readonly _points: THREE.Vector3[] = [];
   private readonly _maxPoints: number;
   private readonly _halfWidth: number;
+  private readonly _tipFactor: number;
   private readonly _camDir: THREE.Vector3;
   private readonly _positions: Float32Array;
   private readonly _geometry = new THREE.BufferGeometry();
@@ -23,9 +25,18 @@ export class TrailRibbon {
   private readonly _seg = new THREE.Vector3();
   private readonly _side = new THREE.Vector3();
 
-  public constructor(parent: THREE.Object3D, color: number, width: number, opacity: number, maxPoints: number, camDir: THREE.Vector3) {
+  public constructor(
+    parent: THREE.Object3D,
+    color: number,
+    width: number,
+    tipWidth: number,
+    opacity: number,
+    maxPoints: number,
+    camDir: THREE.Vector3,
+  ) {
     this._maxPoints = Math.max(2, Math.floor(maxPoints));
     this._halfWidth = width / 2;
+    this._tipFactor = Math.max(0, Math.min(1, tipWidth));
     this._camDir = camDir.clone().normalize();
 
     this._positions = new Float32Array(this._maxPoints * 2 * 3);
@@ -95,11 +106,16 @@ export class TrailRibbon {
       return;
     }
     for (let i = 0; i < this._maxPoints; i++) {
-      const p = this._points[Math.min(i, last)]!;
-      const ahead = this._points[Math.max(0, Math.min(i, last) - 1)]!;
+      const idx = Math.min(i, last);
+      const p = this._points[idx]!;
+      const ahead = this._points[Math.max(0, idx - 1)]!;
       this._seg.subVectors(ahead, p);
       if (this._seg.lengthSq() < 1e-8) this._seg.set(1, 0, 0);
-      this._side.crossVectors(this._seg, this._camDir).normalize().multiplyScalar(this._halfWidth);
+      // Taper the half-width from the full base at the head (idx 0) to
+      // `tipFactor` at the tail tip (idx last) → a triangle.
+      const t = last > 0 ? idx / last : 0;
+      const hw = this._halfWidth * (1 - t * (1 - this._tipFactor));
+      this._side.crossVectors(this._seg, this._camDir).normalize().multiplyScalar(hw);
       const o = i * 6;
       this._positions[o] = p.x + this._side.x;
       this._positions[o + 1] = p.y + this._side.y;

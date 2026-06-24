@@ -16,6 +16,9 @@ export interface IFactoryScreenView extends IScreenView {
   /** Update the charge rings around the boosters (0→1 each); a full ring means
    * the booster is usable (its icon also un-dims). */
   setBoosterCharge(fanFill: number, springFill: number): void;
+  /** Pop the spring booster's scale to prompt its use (a full tray held open by a
+   * charged spring instead of ending the game). */
+  pulseSpringBooster(): void;
   showResult(result: GameResult): void;
   hideBanner(): void;
   /** Play the 3-2-1-Go intro, calling `onDone` when it finishes. */

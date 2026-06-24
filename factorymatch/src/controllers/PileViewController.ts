@@ -85,6 +85,8 @@ export class PileViewController implements IViewController<IPileView> {
       this._view!.applyCollect(result);
       if (result.goal) this._events!.emitGoalChanged(result.goal.index, result.goal.remaining);
     }
+    // A full tray held open by a charged spring: nudge the player to use it.
+    if (this._ops!.consumeSpringPrompt()) this._events!.emitSpringPrompt();
     this._publishHud();
   }
 

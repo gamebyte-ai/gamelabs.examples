@@ -460,7 +460,7 @@ export class PileView extends WorldViewBase implements IPileView {
     const camera = this._world?.activeCamera;
     if (!cfg.enabled || !camera) return;
     const camDir = camera.getWorldDirection(new THREE.Vector3());
-    const ribbon = new TrailRibbon(this, cfg.color, cfg.width, cfg.opacity, cfg.points, camDir);
+    const ribbon = new TrailRibbon(this, cfg.color, cfg.width, cfg.tipWidth, cfg.opacity, cfg.points, camDir);
     this._trails.add(ribbon);
 
     const driver = { t: 0 };

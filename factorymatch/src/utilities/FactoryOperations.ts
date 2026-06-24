@@ -77,6 +77,9 @@ export class FactoryOperations {
    * both; a booster is usable at full charge, then resets to 0 when used. */
   private _fanCharge = 0;
   private _springCharge = 0;
+  /** Set when a full tray was held open by a charged spring (the loss was deferred);
+   * the controller reads + clears it to pulse the spring booster as a prompt. */
+  private _springPromptPending = false;
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
 
   public inject(resolver: IInstanceResolver): void {
@@ -108,6 +111,7 @@ export class FactoryOperations {
     this._comboFill = 0;
     this._fanCharge = 0;
     this._springCharge = 0;
+    this._springPromptPending = false;
 
     this._buildBin();
     this._buildPile();
@@ -279,6 +283,15 @@ export class FactoryOperations {
 
     const cfg = this._config!;
 
+    // Tray already full but held open by a charged spring (a prior pick deferred
+    // the loss): block this pick so the tray can't overflow, and re-prompt the
+    // spring instead. If somehow not charged, the loss stands.
+    if (this._slots.length >= cfg.slots.capacity) {
+      if (this._springCharge >= cfg.boosters.springMatchCount) this._springPromptPending = true;
+      else this._model!.setLost("tray");
+      return null;
+    }
+
     const t = this._physics!.getTransform(bodyId, this._t);
     const from = { x: t.x, y: t.y, z: t.z };
     this._stage!.despawn(bodyId); // collider off — the shape leaves the simulation
@@ -312,10 +325,15 @@ export class FactoryOperations {
       this._chargeBoosters();
     }
 
-    // Win on an empty pile; otherwise lose the moment the tray fills with no room
-    // left (this pick reached capacity without clearing a match).
-    if (this._pile.size === 0) this._model!.setStatus("won");
-    else if (this._slots.length >= cfg.slots.capacity) this._model!.setLost("tray");
+    // Win on an empty pile; otherwise the tray filling up loses — UNLESS a charged
+    // spring can rescue, in which case defer the loss and prompt the player to use
+    // the spring (the controller pulses its icon).
+    if (this._pile.size === 0) {
+      this._model!.setStatus("won");
+    } else if (this._slots.length >= cfg.slots.capacity) {
+      if (this._springCharge >= cfg.boosters.springMatchCount) this._springPromptPending = true;
+      else this._model!.setLost("tray");
+    }
 
     return { addedId, kind, from, clearedIds, goal };
   }
@@ -366,6 +384,15 @@ export class FactoryOperations {
   /** Spring booster charge fill (0→1). */
   public get springFill(): number {
     return Math.min(1, this._springCharge / this._config!.boosters.springMatchCount);
+  }
+
+  /** True once if the last pick met a full tray held open by a charged spring (the
+   * loss was deferred); reading it clears the flag. The controller pulses the
+   * spring booster so the player knows to use it. */
+  public consumeSpringPrompt(): boolean {
+    const v = this._springPromptPending;
+    this._springPromptPending = false;
+    return v;
   }
 
   /** A match charges both boosters by one match, each capped at its own count. */
