@@ -1,6 +1,6 @@
 import * as PIXI from "pixi.js";
 import gsap from "gsap";
-import { ScreenView, type IInstanceResolver } from "@gamebyte/gamelabsjs";
+import { ScreenView, type IInstanceResolver, type Unsubscribe } from "@gamebyte/gamelabsjs";
 
 import type { GameResult, IFactoryScreenView } from "./IFactoryScreenView.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
@@ -52,6 +52,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _goalValues: PIXI.Text[] = [];
   private readonly _boosterFan = new PIXI.Sprite();
   private readonly _boosterSpring = new PIXI.Sprite();
+  private readonly _fanListeners = new Set<() => void>();
 
   private readonly _banner = new PIXI.Sprite();
   // Intro countdown: a number sprite (3/2/1) and a "Go" text, centred + popped.
@@ -114,6 +115,13 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._initBooster(this._boosterSpring, FactoryMatchAssetIds.BoosterSpring, boosterH);
     this._bottomBar.addChild(this._boosterFan, this._boosterSpring);
 
+    // The fan booster is tappable; other UI stays pass-through.
+    this._boosterFan.eventMode = "static";
+    this._boosterFan.cursor = "pointer";
+    this._boosterFan.on("pointertap", () => {
+      for (const cb of this._fanListeners) cb();
+    });
+
     this._layoutDesign();
 
     this._banner.anchor.set(0.5);
@@ -175,6 +183,11 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
 
   public hideBanner(): void {
     this._banner.visible = false;
+  }
+
+  public onFanTap(cb: () => void): Unsubscribe {
+    this._fanListeners.add(cb);
+    return () => this._fanListeners.delete(cb);
   }
 
   public playCountdown(onDone: () => void): void {

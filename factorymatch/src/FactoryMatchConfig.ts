@@ -41,11 +41,12 @@ export class FactoryMatchConfig {
     halfDepth: 1.4, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
-    wallHeight: 6.0, // visible glass-wall height
+    wallHeight: 10.0, // visible glass-wall height
     wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.5,
     wallColor: 0x3b4250,
     transparent: true, // skip the bin's visual mesh (colliders stay) — pile sits on the background
+    lidHeight: 6, // a ceiling collider closes the pool this high above the floor once play starts (keeps booster-flung items in)
   };
 
   /** 3D slot rack in front of the bin where collected shapes fly to and line up.
@@ -126,7 +127,7 @@ export class FactoryMatchConfig {
     billardball: 18,
     guitar: 24,
     radio: 18,
-    gascan: 24,
+    gascan: 30,
   };
   /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
    * bin (so they spawn together as a compact cloud, not a tall column): `cell` is
@@ -173,6 +174,26 @@ export class FactoryMatchConfig {
   /** Minimum delay between picks (seconds): after collecting an item, further
    * picks are ignored until this elapses (prevents rapid multi-collect). */
   public readonly pickCooldown = 0.09;
+
+  /** Fan booster: tapping it blows the pile into a clockwise tornado. `duration`
+   * (seconds) is how long it spins; `settleAfter` keeps physics running this many
+   * extra seconds afterwards so the pile resettles before freezing; `strength` the
+   * tangential (swirl) force; `inward` the pull toward the pool centre (keeps the
+   * vortex tight); `lift` the upward force, applied strongest at the floor and
+   * tapering to zero at `height` (so the swirl fills a column that tall instead of
+   * blasting everything to the top); `direction` (+1/-1) flips the spin. `ramp`
+   * (seconds) eases the force in at the start and out at the end so it doesn't
+   * begin/stop abruptly. */
+  public readonly fan = {
+    duration: 4,
+    settleAfter: 2.5,
+    strength: 35,
+    inward: 10,
+    lift: 8,
+    height: 25,
+    ramp: 0.6,
+    direction: 1,
+  };
 
   /** Countdown clock shown top-centre. `startSeconds` is the time the player has;
    * when it reaches zero the game is lost. Displayed as mm:ss. */

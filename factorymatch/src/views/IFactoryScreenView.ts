@@ -1,4 +1,4 @@
-import type { IScreenView } from "@gamebyte/gamelabsjs";
+import type { IScreenView, Unsubscribe } from "@gamebyte/gamelabsjs";
 
 /** End-of-game banner to show. */
 export type GameResult = "allClear" | "timeUp" | "gameOver";
@@ -14,4 +14,6 @@ export interface IFactoryScreenView extends IScreenView {
   hideBanner(): void;
   /** Play the 3-2-1-Go intro, calling `onDone` when it finishes. */
   playCountdown(onDone: () => void): void;
+  /** Register a handler for taps on the fan booster button. */
+  onFanTap(cb: () => void): Unsubscribe;
 }

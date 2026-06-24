@@ -55,6 +55,7 @@ export class PileViewController implements IViewController<IPileView> {
         if (status !== "playing") view.setInteractive(false);
       }),
     );
+    this._subs.add(this._events!.onFanActivated(() => this._ops!.activateFan()));
     this._updateUnsub = this._updateManager!.register((dt) => this._onUpdate(dt));
 
     this._ops!.buildLevel();

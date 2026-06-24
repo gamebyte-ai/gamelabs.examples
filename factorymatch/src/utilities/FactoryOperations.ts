@@ -64,6 +64,8 @@ export class FactoryOperations {
   private _settle = 0;
   /** Seconds until the next pick is allowed (input cooldown after a collect). */
   private _pickCooldown = 0;
+  /** Seconds of fan-booster swirl still owed (tornado force on the pile). */
+  private _swirl = 0;
   /** Remaining count per goal (parallel to config.goals), counted down on collect. */
   private _goalRemaining: number[] = [];
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
@@ -175,9 +177,41 @@ export class FactoryOperations {
 
   //  PICK — collect a specific pile body (chosen by the view's visual raycast)
 
-  /** Begin play once the intro countdown completes (enables picks + the clock). */
+  /** Begin play once the intro countdown completes (enables picks + the clock).
+   * Also closes the pool with a ceiling collider so boosters can't fling items
+   * out the top (the open top let the initial drop fall in first). */
   public start(): void {
+    if (this._model!.started) return;
     this._model!.setStarted(true);
+    this._addLid();
+  }
+
+  /** Fan booster: spin the pile into a clockwise tornado for a few seconds. */
+  public activateFan(): void {
+    if (!this._model!.started || this._model!.status !== "playing") return;
+    const fan = this._config!.fan;
+    this._swirl = fan.duration;
+    // Keep the pile simulated through the swirl AND a settle-out window after it.
+    this._settle = Math.max(this._settle, fan.duration + fan.settleAfter);
+  }
+
+  /** Swirl strength multiplier 0→1→0 across the booster's life: smoothstep ramp-in
+   * over `ramp`, full in the middle, smoothstep ramp-out over the last `ramp`. */
+  private _swirlIntensity(): number {
+    const fan = this._config!.fan;
+    if (fan.ramp <= 0) return 1;
+    const elapsed = fan.duration - this._swirl; // time since the fan started
+    const lin = Math.max(0, Math.min(1, Math.min(elapsed, this._swirl) / fan.ramp));
+    return lin * lin * (3 - 2 * lin); // smoothstep
+  }
+
+  /** Ceiling collider at `bin.lidHeight` above the floor, spanning the pool. */
+  private _addLid(): void {
+    const { bin } = this._config!;
+    const t = bin.wallThickness;
+    const spanX = bin.halfWidth * 2 + t * 2;
+    const spanZ = bin.halfDepth * 2 + t * 2;
+    this._binIds.push(this._physics!.createBody(this._static(spanX, t, spanZ, 0, bin.floorY + bin.lidHeight, 0)));
   }
 
   /** Collect the given pile body. The view resolves which body via a precise mesh
@@ -243,12 +277,38 @@ export class FactoryOperations {
     this._timer!.tick(dt);
     if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
 
-    // World gravity (set at creation) is the drop value; once play has begun,
-    // nudge the simulated pile to the after-start gravity via a per-body force.
+    // Per-body forces while the pile is simulated: the gravity correction (drop →
+    // after-start), plus the fan booster's clockwise tornado when active.
     if (this._settle > 0) {
       const phys = this._config!.physics;
+      const fan = this._config!.fan;
       const dg = phys.gravityAfterStart - phys.gravity; // bodies have mass 1, so force == accel
-      if (dg !== 0) for (const id of this._pile.keys()) this._physics!.applyForce(id, 0, dg, 0);
+      const swirling = this._swirl > 0;
+      // Ease the swirl in at the start and out at the end (smoothstep over `ramp`)
+      // so the fan ramps up/down instead of snapping on/off.
+      const intensity = swirling ? this._swirlIntensity() : 0;
+      if (dg !== 0 || swirling) {
+        for (const id of this._pile.keys()) {
+          let fx = 0;
+          let fz = 0;
+          let fy = dg;
+          if (swirling) {
+            const t = this._physics!.getTransform(id, this._t); // radial from the pool centre (0,0)
+            const r = Math.hypot(t.x, t.z) || 1;
+            const spin = fan.strength * intensity;
+            const pull = fan.inward * intensity;
+            // tangential spin (perpendicular to the radius) + inward pull to the centre
+            fx += ((t.z / r) * spin) * fan.direction - (t.x / r) * pull;
+            fz += ((-t.x / r) * spin) * fan.direction - (t.z / r) * pull;
+            // Lift is strongest at the floor and fades to 0 at `height`, so items
+            // are drawn up into a column that tall (not all blasted to the ceiling).
+            const rel = Math.max(0, 1 - (t.y - this._config!.bin.floorY) / fan.height);
+            fy += fan.lift * intensity * rel;
+          }
+          this._physics!.applyForce(id, fx, fy, fz);
+        }
+      }
+      if (swirling) this._swirl = Math.max(0, this._swirl - dt);
     }
   }
 

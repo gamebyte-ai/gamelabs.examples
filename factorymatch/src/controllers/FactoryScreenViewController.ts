@@ -36,6 +36,7 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
     this._subs.add(this._events!.onStatusChanged((s) => this._applyStatus(s)));
     this._subs.add(this._timer!.onChange((elapsed) => this._renderTime(elapsed)));
     this._subs.add(this._events!.onGoalChanged((i, remaining) => this._onGoalChanged(i, remaining)));
+    this._subs.add(view.onFanTap(() => this._events!.emitFanActivated()));
   }
 
   /** Update a goal's count and pop it to acknowledge the collection. */

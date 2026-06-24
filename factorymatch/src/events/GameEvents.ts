@@ -11,6 +11,7 @@ export class GameEvents {
   private readonly _statusChanged = new Set<(status: GameStatus) => void>();
   private readonly _goalChanged = new Set<(index: number, remaining: number) => void>();
   private readonly _started = new Set<() => void>();
+  private readonly _fanActivated = new Set<() => void>();
 
   public onScoreChanged(cb: (score: number) => void): Unsubscribe {
     this._scoreChanged.add(cb);
@@ -43,5 +44,14 @@ export class GameEvents {
   }
   public emitStarted(): void {
     for (const cb of this._started) cb();
+  }
+
+  /** Fired when the fan booster is tapped. */
+  public onFanActivated(cb: () => void): Unsubscribe {
+    this._fanActivated.add(cb);
+    return () => this._fanActivated.delete(cb);
+  }
+  public emitFanActivated(): void {
+    for (const cb of this._fanActivated) cb();
   }
 }
