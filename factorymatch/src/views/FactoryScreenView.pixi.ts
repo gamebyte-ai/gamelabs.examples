@@ -15,9 +15,8 @@ const GOAL_H = 88; // on-screen height of each goal chip
 const MULT_H = 62; // on-screen height of the multiplier circle
 const GOAL_GAP = 10; // px between goal chips
 const PILL_GAP = 14; // px between the timer + score pills (they stay centred as a pair)
-const MULT_X = 54; // multiplier badge centre, fixed px from the left edge
-const BOOSTER_H = 76; // on-screen height of each bottom booster button
-const BOOSTER_GAP = 56; // px between the two booster buttons
+const MULT_X = 54; // multiplier badge centre, px in from the game-screen's left edge
+const BOOSTER_GAP_FRACTION = 0.7; // gap between boosters, as a fraction of their height
 const BOOSTER_BOTTOM = 72; // booster row centre, fixed px up from the bottom edge
 const BANNER_WIDTH = 360; // end banner on-screen width (px), fixed — does not scale with the viewport
 
@@ -220,9 +219,14 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._w = Math.max(1, width);
     this._h = Math.max(1, height);
 
-    // Timer + score stay centred as a pair near the top, a fixed gap apart —
-    // tied to the top of the screen, not scaled by the viewport width.
+    // The HUD lays out within a centred "game screen" column (capped to gameScreen
+    // maxAspect), so edge-attached UI sticks to this rect — not the viewport edge —
+    // when the viewport is wider. Centred UI sits on cx (shared with the viewport).
     const cx = this._w / 2;
+    const gameW = Math.min(this._w, this._h * this._config!.gameScreen.maxAspect);
+    const gameLeft = cx - gameW / 2;
+
+    // Timer + score stay centred as a pair near the top, a fixed gap apart.
     const topY = this._config!.hud.topY;
     const pillHalf = (this._timer.width + PILL_GAP) / 2;
     const timerX = cx - pillHalf;
@@ -232,16 +236,21 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._score.position.set(scoreX, topY);
     this._scoreCaption.position.set(scoreX, topY - CAPTION_DY);
 
-    this._multiplier.position.set(MULT_X, MULT_Y);
+    // Multiplier is attached to the game screen's left edge (not the viewport's).
+    this._multiplier.position.set(gameLeft + MULT_X, MULT_Y);
     this._layoutGoals();
 
     const centre = { x: this._w / 2, y: this._h * 0.42 };
     this._countNode.position.set(centre.x, centre.y);
     this._goNode.position.set(centre.x, centre.y);
 
-    // Two booster buttons centred as a pair near the bottom edge.
+    // Two booster buttons centred as a pair near the bottom edge. Their height
+    // tracks the game-screen width, so they shrink/grow with the screen.
+    const boosterH = gameW * this._config!.hud.boosterScale;
+    this._scaleBooster(this._boosterFan, boosterH);
+    this._scaleBooster(this._boosterSpring, boosterH);
     const boosterY = this._h - BOOSTER_BOTTOM;
-    const boosterHalf = (this._boosterFan.width + BOOSTER_GAP) / 2;
+    const boosterHalf = (this._boosterFan.width + boosterH * BOOSTER_GAP_FRACTION) / 2;
     this._boosterFan.position.set(cx - boosterHalf, boosterY);
     this._boosterSpring.position.set(cx + boosterHalf, boosterY);
 
@@ -266,13 +275,17 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._banner.position.set(this._w / 2, this._h * 0.42);
   }
 
-  /** Texture + centre-anchor + height-scale a booster sprite from its asset. */
+  /** Texture + centre-anchor a booster sprite (height is set responsively in onResize). */
   private _initBooster(sprite: PIXI.Sprite, id: FactoryMatchAssetIds): void {
     const texture = this.assetLoader.getAsset<PIXI.Texture>(id);
     if (!texture) return;
     sprite.texture = texture;
     sprite.anchor.set(0.5);
-    sprite.scale.set(BOOSTER_H / texture.height);
+  }
+
+  /** Scale a booster sprite to a target on-screen height. */
+  private _scaleBooster(sprite: PIXI.Sprite, height: number): void {
+    if (sprite.texture.height > 0) sprite.scale.set(height / sprite.texture.height);
   }
 
   /** Build a centred bg sprite (scaled to `targetH`) with a centred value label. */

@@ -9,12 +9,13 @@ async function start(): Promise<void> {
   const stage = document.getElementById("stage");
   if (!stage) throw new Error("Missing #stage element");
 
+  const config = new FactoryMatchConfig();
   // Load the 3D models up front so the pile can spawn them synchronously. A
   // failed load rejects here and is surfaced by start().catch — no partial run.
-  const models = new ModelLibraryService(new FactoryMatchConfig());
+  const models = new ModelLibraryService(config);
   await models.load();
 
-  const app = new FactoryMatchApp(stage, models);
+  const app = new FactoryMatchApp(stage, config, models);
   await app.initialize();
   app.mainLoop();
 }

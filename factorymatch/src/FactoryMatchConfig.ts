@@ -1,4 +1,4 @@
-import { SCREEN_TRANSITION_TYPES, type ScreenTransition } from "@gamebyte/gamelabsjs";
+import { SCREEN_TRANSITION_TYPES, type ScreenTransition, type ViewportConfig } from "@gamebyte/gamelabsjs";
 import type { Kind } from "./models/IGameModel.js";
 
 /** Per-kind (box) collider full-extents + a tint colour applied to kinds that
@@ -15,6 +15,22 @@ export class FactoryMatchConfig {
 
   /** Solid clear colour behind the 3D scene (the game background). */
   public readonly background = 0x3a485b;
+
+  /** Letterbox / pillarbox fit for the whole render surface. The viewport fills
+   * the mount while its aspect stays within [minAspect, maxAspect]; outside that
+   * band it's contained (black bars). */
+  public readonly viewport: ViewportConfig = {
+    fit: "contain",
+    minAspect: 9 / 23, // tallest/narrowest portrait phones fill (no bars)
+    maxAspect: 3 / 4, // wider than this → black bars (lower it = black sooner)
+    background: "#000000",
+  };
+
+  /** Inner play column the HUD lays its UI out within: edge-attached components
+   * stick to THIS rect's edges, not the viewport's. Width is
+   * min(viewportWidth, viewportHeight * maxAspect), centred; the gap to the
+   * viewport edges shows the scene background. */
+  public readonly gameScreen = { maxAspect: 0.5 };
 
   /** Static bin the shapes pile up in. `transparent` hides the floor + glass
    * walls so the pile floats on the background (the colliders are unaffected). */
@@ -172,6 +188,7 @@ export class FactoryMatchConfig {
     goalIconY: -14,
     goalPulseScale: 1.2, // peak scale of a goal chip's pop when its count ticks down
     goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
+    boosterScale: 0.18, // bottom booster icon height as a fraction of the game-screen width (scales with screen size)
   };
 
   /** Fixed 3D camera looking down into the bin.

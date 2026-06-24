@@ -26,15 +26,17 @@ import { FactoryOperations } from "./utilities/FactoryOperations";
 import { ModelLibraryService } from "./services/ModelLibraryService";
 
 export class FactoryMatchApp extends GamelabsApp {
-  private readonly _config = new FactoryMatchConfig();
+  private readonly _config: FactoryMatchConfig;
   private readonly _assetRequestList = new AssetRequestList();
   private _physicsUnsub: Unsubscribe | null = null;
   private _pileView: PileView | null = null;
 
   /** `models` must already be loaded (see main.ts) — the PileView resolves it and
-   * clones synchronously when the pile spawns. */
-  public constructor(stageEl: HTMLElement, private readonly _models: ModelLibraryService) {
-    super({ mount: stageEl });
+   * clones synchronously when the pile spawns. The viewport letterboxes the
+   * render surface (see FactoryMatchConfig.viewport). */
+  public constructor(stageEl: HTMLElement, config: FactoryMatchConfig, private readonly _models: ModelLibraryService) {
+    super({ mount: stageEl, viewport: config.viewport });
+    this._config = config;
   }
 
   protected override registerModules(): void {
