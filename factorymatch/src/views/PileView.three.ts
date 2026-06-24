@@ -15,6 +15,10 @@ const OUTLINE_RIM_ORDER = 999; // …then the rim, drawn only outside it, over o
 interface SlotMesh {
   kind: Kind;
   obj: THREE.Object3D;
+  /** Slot index this item was last animated toward; -1 until first laid out.
+   * Re-layout skips items whose index is unchanged so in-flight tweens aren't
+   * restarted (which would leave them hovering). */
+  index: number;
 }
 
 /**
@@ -159,7 +163,7 @@ export class PileView extends WorldViewBase implements IPileView {
     const obj = this._makeShape(result.kind);
     obj.position.set(result.from.x, result.from.y, result.from.z);
     this.add(obj);
-    this._slots.set(result.addedId, { kind: result.kind, obj });
+    this._slots.set(result.addedId, { kind: result.kind, obj, index: -1 });
     // Insert just to the right of the rightmost same-kind item (so each kind
     // stays contiguous); if there's no match yet, append to the end. Everything
     // to the right shifts one slot over, handled by _layout re-indexing.
@@ -217,6 +221,7 @@ export class PileView extends WorldViewBase implements IPileView {
       const seatY = target.y + cfg.rack.itemLift;
       const isFlown = id === flownId;
       if (isFlown) {
+        slot.index = index;
         // Hop: glide x/z straight to the slot while y arcs up to a peak then drops
         // in, so the item lifts off the pile before flying rather than sliding flat.
         const peakY = Math.max(slot.obj.position.y, seatY) + cfg.rack.arcLift;
@@ -250,11 +255,12 @@ export class PileView extends WorldViewBase implements IPileView {
           overwrite: true,
         });
       } else {
-        // Seated neighbours that actually change slot hop across to it; ones
-        // already in place are left untouched so they don't bounce for nothing.
-        const moved =
-          Math.abs(slot.obj.position.x - target.x) > 1e-3 || Math.abs(slot.obj.position.z - target.z) > 1e-3;
-        if (!moved) return;
+        // Seated neighbours hop only when their SLOT actually changes. Comparing
+        // the target index (not the live position) means an item already settled
+        // at — or still animating toward — this slot is left alone, so rapid picks
+        // don't restart its tween and leave it hovering.
+        if (slot.index === index) return;
+        slot.index = index;
         const dip = cfg.rack.suspensionDip;
         const drop = Math.max(cfg.anim.trayDrop, 0);
         const hopTime = Math.max(cfg.anim.slide, drop); // stretched if the tray needs longer to give way

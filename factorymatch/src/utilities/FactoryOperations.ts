@@ -62,6 +62,8 @@ export class FactoryOperations {
   /** Seconds of physics simulation still owed; the world is stepped only while > 0
    * so an idle pile freezes instead of jittering. */
   private _settle = 0;
+  /** Seconds until the next pick is allowed (input cooldown after a collect). */
+  private _pickCooldown = 0;
   /** Remaining count per goal (parallel to config.goals), counted down on collect. */
   private _goalRemaining: number[] = [];
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
@@ -183,6 +185,7 @@ export class FactoryOperations {
    * (box colliders alone would let a neighbour intercept the ray). */
   public pick(bodyId: BodyId): CollectResult | null {
     if (!this._model!.started || this._model!.status !== "playing") return null;
+    if (this._pickCooldown > 0) return null; // wait out the post-pick delay
     const kind = this._pile.get(bodyId);
     if (kind === undefined) return null; // already collected / not a pile body
 
@@ -193,6 +196,7 @@ export class FactoryOperations {
     this._stage!.despawn(bodyId); // collider off — the shape leaves the simulation
     this._pile.delete(bodyId);
     this._settle = cfg.physics.settleSeconds; // wake the pile so it resettles into the gap, then freeze
+    this._pickCooldown = cfg.pickCooldown; // block the next pick briefly
 
     const addedId = this._nextItemId++;
     this._slots.push({ id: addedId, kind });
@@ -232,6 +236,7 @@ export class FactoryOperations {
   public update(dt: number): void {
     this._stage!.sync();
     if (this._settle > 0) this._settle = Math.max(0, this._settle - dt); // burn down the physics-on window
+    if (this._pickCooldown > 0) this._pickCooldown = Math.max(0, this._pickCooldown - dt); // burn down the pick cooldown
     // The clock only runs once play has begun (after the intro countdown) and
     // while playing; hitting zero ends the game.
     if (!this._model!.started || this._model!.status !== "playing") return;

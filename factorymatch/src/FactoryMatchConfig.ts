@@ -29,8 +29,10 @@ export class FactoryMatchConfig {
   /** Inner play column the HUD lays its UI out within: edge-attached components
    * stick to THIS rect's edges, not the viewport's. Width is
    * min(viewportWidth, viewportHeight * maxAspect), centred; the gap to the
-   * viewport edges shows the scene background. */
-  public readonly gameScreen = { maxAspect: 0.5 };
+   * viewport edges shows the scene background. `refWidth` is the design width at
+   * which the HUD's px sizes are authored — the whole HUD scales by
+   * gameWidth / refWidth, so every element shrinks/grows with the screen. */
+  public readonly gameScreen = { maxAspect: 0.5, refWidth: 440 };
 
   /** Static bin the shapes pile up in. `transparent` hides the floor + glass
    * walls so the pile floats on the background (the colliders are unaffected). */
@@ -161,6 +163,10 @@ export class FactoryMatchConfig {
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
   public readonly slots = { capacity: 7, matchCount: 3, matchPoints: 10 };
 
+  /** Minimum delay between picks (seconds): after collecting an item, further
+   * picks are ignored until this elapses (prevents rapid multi-collect). */
+  public readonly pickCooldown = 0.09;
+
   /** Countdown clock shown top-centre. `startSeconds` is the time the player has;
    * when it reaches zero the game is lost. Displayed as mm:ss. */
   public readonly time = { startSeconds: 120 };
@@ -189,6 +195,7 @@ export class FactoryMatchConfig {
     goalPulseScale: 1.2, // peak scale of a goal chip's pop when its count ticks down
     goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
     boosterScale: 0.18, // bottom booster icon height as a fraction of the game-screen width (scales with screen size)
+    bannerScale: 0.82, // end-of-game banner width as a fraction of the game-screen width (scales with screen size)
   };
 
   /** Fixed 3D camera looking down into the bin.

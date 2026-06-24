@@ -18,7 +18,6 @@ const PILL_GAP = 14; // px between the timer + score pills (they stay centred as
 const MULT_X = 54; // multiplier badge centre, px in from the game-screen's left edge
 const BOOSTER_GAP_FRACTION = 0.7; // gap between boosters, as a fraction of their height
 const BOOSTER_BOTTOM = 72; // booster row centre, fixed px up from the bottom edge
-const BANNER_WIDTH = 360; // end banner on-screen width (px), fixed — does not scale with the viewport
 
 const RESULT_ASSET: Record<GameResult, FactoryMatchAssetIds> = {
   allClear: FactoryMatchAssetIds.ResultAllClear,
@@ -35,6 +34,12 @@ const RESULT_ASSET: Record<GameResult, FactoryMatchAssetIds> = {
 export class FactoryScreenView extends ScreenView implements IFactoryScreenView {
   private _config: FactoryMatchConfig | null = null;
 
+  // Scalable HUD chrome lives in two bars that are laid out once in design space
+  // (px @ gameScreen.refWidth) and uniformly scaled to the game screen on resize:
+  // _topBar anchors to the top, _bottomBar to the bottom. Banner + countdown are
+  // separate overlays on the root.
+  private readonly _topBar = new PIXI.Container();
+  private readonly _bottomBar = new PIXI.Container();
   private readonly _timer = new PIXI.Container();
   private readonly _timerValue = this._makeText(22, 0xe8eef6, "800");
   private readonly _timerCaption = this._makeText(13, 0x9fb0c3, "700");
@@ -66,6 +71,8 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   public override postInitialize(): void {
     super.postInitialize();
 
+    this.addChild(this._topBar, this._bottomBar);
+
     // Timer + score share the same pill bg, each captioned above.
     this._buildBadge(this._timer, this._timerValue, FactoryMatchAssetIds.TimerBg, PILL_H);
     this._buildBadge(this._score, this._scoreValue, FactoryMatchAssetIds.TimerBg, PILL_H);
@@ -73,11 +80,11 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._scoreCaption.text = "SCORE";
     this._timerCaption.anchor.set(0.5);
     this._scoreCaption.anchor.set(0.5);
-    this.addChild(this._timer, this._score, this._timerCaption, this._scoreCaption);
+    this._topBar.addChild(this._timer, this._score, this._timerCaption, this._scoreCaption);
 
     this._buildBadge(this._multiplier, this._multiplierValue, FactoryMatchAssetIds.MultiplierBg, MULT_H);
     this._multiplierValue.text = "x1";
-    this.addChild(this._multiplier);
+    this._topBar.addChild(this._multiplier);
 
     for (const goal of this._config!.goals) {
       const chip = new PIXI.Container();
@@ -97,12 +104,17 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
       value.position.set(0, this._config!.hud.goalTextY);
       this._goals.push(chip);
       this._goalValues.push(value);
-      this.addChild(chip);
+      this._topBar.addChild(chip);
     }
 
-    this._initBooster(this._boosterFan, FactoryMatchAssetIds.BoosterFan);
-    this._initBooster(this._boosterSpring, FactoryMatchAssetIds.BoosterSpring);
-    this.addChild(this._boosterFan, this._boosterSpring);
+    // Boosters are built at design size (px @ refWidth); _bottomBar's scale makes
+    // them responsive — height ends up gameWidth * hud.boosterScale on screen.
+    const boosterH = this._config!.gameScreen.refWidth * this._config!.hud.boosterScale;
+    this._initBooster(this._boosterFan, FactoryMatchAssetIds.BoosterFan, boosterH);
+    this._initBooster(this._boosterSpring, FactoryMatchAssetIds.BoosterSpring, boosterH);
+    this._bottomBar.addChild(this._boosterFan, this._boosterSpring);
+
+    this._layoutDesign();
 
     this._banner.anchor.set(0.5);
     this._banner.visible = false;
@@ -219,73 +231,75 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._w = Math.max(1, width);
     this._h = Math.max(1, height);
 
-    // The HUD lays out within a centred "game screen" column (capped to gameScreen
-    // maxAspect), so edge-attached UI sticks to this rect — not the viewport edge —
-    // when the viewport is wider. Centred UI sits on cx (shared with the viewport).
+    // Game screen: a centred column capped to gameScreen.maxAspect. The HUD is laid
+    // out once in design px (@ refWidth); here we just scale + anchor the two bars
+    // so every element scales uniformly with the screen and sticks to its edge.
     const cx = this._w / 2;
-    const gameW = Math.min(this._w, this._h * this._config!.gameScreen.maxAspect);
-    const gameLeft = cx - gameW / 2;
+    const gameW = this._gameWidth();
+    const scale = gameW / this._config!.gameScreen.refWidth;
 
-    // Timer + score stay centred as a pair near the top, a fixed gap apart.
-    const topY = this._config!.hud.topY;
-    const pillHalf = (this._timer.width + PILL_GAP) / 2;
-    const timerX = cx - pillHalf;
-    const scoreX = cx + pillHalf;
-    this._timer.position.set(timerX, topY);
-    this._timerCaption.position.set(timerX, topY - CAPTION_DY);
-    this._score.position.set(scoreX, topY);
-    this._scoreCaption.position.set(scoreX, topY - CAPTION_DY);
+    this._topBar.scale.set(scale);
+    this._topBar.position.set(cx, 0); // children's design y measures down from the top
+    this._bottomBar.scale.set(scale);
+    this._bottomBar.position.set(cx, this._h); // children's design y measures up from the bottom
 
-    // Multiplier is attached to the game screen's left edge (not the viewport's).
-    this._multiplier.position.set(gameLeft + MULT_X, MULT_Y);
-    this._layoutGoals();
-
-    const centre = { x: this._w / 2, y: this._h * 0.42 };
+    const centre = { x: cx, y: this._h * 0.42 };
     this._countNode.position.set(centre.x, centre.y);
     this._goNode.position.set(centre.x, centre.y);
-
-    // Two booster buttons centred as a pair near the bottom edge. Their height
-    // tracks the game-screen width, so they shrink/grow with the screen.
-    const boosterH = gameW * this._config!.hud.boosterScale;
-    this._scaleBooster(this._boosterFan, boosterH);
-    this._scaleBooster(this._boosterSpring, boosterH);
-    const boosterY = this._h - BOOSTER_BOTTOM;
-    const boosterHalf = (this._boosterFan.width + boosterH * BOOSTER_GAP_FRACTION) / 2;
-    this._boosterFan.position.set(cx - boosterHalf, boosterY);
-    this._boosterSpring.position.set(cx + boosterHalf, boosterY);
 
     if (this._banner.visible) this._layoutBanner();
   }
 
-  /** Centre the goal chips in the band to the right of the multiplier badge. */
-  private _layoutGoals(): void {
-    if (this._goals.length === 0) return;
-    const chipW = this._goals[0]!.width;
+  /** Position all chrome once in design space (px @ gameScreen.refWidth). x = 0 is
+   * the game-screen centre; _topBar's y measures down from the top, _bottomBar's up
+   * from the bottom. Edge-attached UI references ±refWidth/2. */
+  private _layoutDesign(): void {
+    const cfg = this._config!;
+    const ref = cfg.gameScreen.refWidth;
+
+    // Timer + score: a centred pair near the top, captioned above.
+    const pillHalf = (this._timer.width + PILL_GAP) / 2;
+    this._timer.position.set(-pillHalf, cfg.hud.topY);
+    this._timerCaption.position.set(-pillHalf, cfg.hud.topY - CAPTION_DY);
+    this._score.position.set(pillHalf, cfg.hud.topY);
+    this._scoreCaption.position.set(pillHalf, cfg.hud.topY - CAPTION_DY);
+
+    // Multiplier: pinned to the game screen's left edge.
+    this._multiplier.position.set(-ref / 2 + MULT_X, MULT_Y);
+
+    // Goal chips: centred row.
+    const chipW = this._goals[0]?.width ?? 0;
     const step = chipW + GOAL_GAP;
-    const centreX = this._w / 2; // goals centred on the screen's x axis
-    const startX = centreX - (step * (this._goals.length - 1)) / 2;
-    const y = this._config!.hud.goalsY;
-    this._goals.forEach((chip, i) => chip.position.set(startX + i * step, y));
+    const startX = -(step * (this._goals.length - 1)) / 2;
+    this._goals.forEach((chip, i) => chip.position.set(startX + i * step, cfg.hud.goalsY));
+
+    // Boosters: centred pair just above the bottom edge.
+    const boosterHalf = (this._boosterFan.width + this._boosterFan.height * BOOSTER_GAP_FRACTION) / 2;
+    this._boosterFan.position.set(-boosterHalf, -BOOSTER_BOTTOM);
+    this._boosterSpring.position.set(boosterHalf, -BOOSTER_BOTTOM);
   }
 
-  /** Scale the end banner to a fixed on-screen width (not viewport-relative) and centre it. */
+  /** Centred game-screen column width (capped to gameScreen.maxAspect). */
+  private _gameWidth(): number {
+    return Math.min(this._w, this._h * this._config!.gameScreen.maxAspect);
+  }
+
+  /** Scale the end banner to a fraction of the game-screen width (scales with the
+   * screen, like the rest of the HUD) and centre it. */
   private _layoutBanner(): void {
     if (!this._banner.texture) return;
-    this._banner.scale.set(BANNER_WIDTH / this._banner.texture.width);
+    const bannerWidth = this._gameWidth() * this._config!.hud.bannerScale;
+    this._banner.scale.set(bannerWidth / this._banner.texture.width);
     this._banner.position.set(this._w / 2, this._h * 0.42);
   }
 
-  /** Texture + centre-anchor a booster sprite (height is set responsively in onResize). */
-  private _initBooster(sprite: PIXI.Sprite, id: FactoryMatchAssetIds): void {
+  /** Texture + centre-anchor + scale a booster sprite to its design height. */
+  private _initBooster(sprite: PIXI.Sprite, id: FactoryMatchAssetIds, designH: number): void {
     const texture = this.assetLoader.getAsset<PIXI.Texture>(id);
     if (!texture) return;
     sprite.texture = texture;
     sprite.anchor.set(0.5);
-  }
-
-  /** Scale a booster sprite to a target on-screen height. */
-  private _scaleBooster(sprite: PIXI.Sprite, height: number): void {
-    if (sprite.texture.height > 0) sprite.scale.set(height / sprite.texture.height);
+    sprite.scale.set(designH / texture.height);
   }
 
   /** Build a centred bg sprite (scaled to `targetH`) with a centred value label. */
