@@ -276,9 +276,9 @@ export class FactoryMatchConfig {
    * `target` is the displayed count. Placeholder wiring — goal art + completion
    * rules come later; for now they render their bg + count text. */
   public readonly goals: { kind: Kind; target: number }[] = [
-    { kind: "dice", target: 3 },
-    { kind: "radio", target: 3 },
-    { kind: "billardball", target: 3 },
+    { kind: "dice", target: 18 },
+    { kind: "radio", target: 18 },
+    { kind: "billardball", target: 18 },
   ];
 
   /** HUD layout (screen pixels). `topY` is the timer + score row centre; `goalsY`
