@@ -73,6 +73,8 @@ export class FactoryMatchConfig {
     gap: 0.06, // empty space between adjacent blocks
     padDepth: 0.4, // pad size in z (world units)
     padColor: 0x222831,
+    dangerColor: 0x830000, // the last (rightmost) pad blinks this when only one tray slot is left
+    dangerBlink: 0.4, // half-period of that warning blink (seconds)
   };
 
   /** Animation durations (seconds). `matchRise`/`matchCollapse` are the two
@@ -294,6 +296,9 @@ export class FactoryMatchConfig {
     goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
     boosterScale: 0.18, // bottom booster icon height as a fraction of the game-screen width (scales with screen size)
     bannerScale: 0.82, // end-of-game banner width as a fraction of the game-screen width (scales with screen size)
+    timerWarnSeconds: 10, // the timer turns red + blinks once this many seconds remain
+    timerWarnColor: 0xff5b5b, // timer text colour while in the warning window
+    timerBlink: 0.3, // half-period of the timer warning blink (seconds)
   };
 
   /** Fixed 3D camera looking down into the bin.

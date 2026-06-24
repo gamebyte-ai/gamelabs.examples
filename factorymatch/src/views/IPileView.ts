@@ -29,4 +29,8 @@ export interface IPileView extends IView {
   /** Enable/disable the hover/press selection outline (off during the countdown
    * and after game over; on while playing). */
   setInteractive(enabled: boolean): void;
+
+  /** Blink the last (rightmost) tray pad red while only one slot is left (danger),
+   * off otherwise. */
+  setTrayDanger(active: boolean): void;
 }

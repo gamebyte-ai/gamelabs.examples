@@ -17,6 +17,7 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
   private _config: FactoryMatchConfig | null = null;
   private readonly _subs = new UnsubscribeBag();
   private _lastTime = "";
+  private _lastTimeWarn = false;
 
   public inject(resolver: IInstanceResolver): void {
     this._model = resolver.getInstance(IGameModel);
@@ -52,6 +53,13 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
   /** Format remaining time and push it to the HUD, skipping same-second redraws. */
   private _renderTime(elapsed: number): void {
     const remaining = TimeFormatter.remaining(this._config!.time.startSeconds, elapsed);
+    // Warn (red + blink) over the final seconds while still playing.
+    const warn =
+      this._model!.status === "playing" && remaining > 0 && remaining <= this._config!.hud.timerWarnSeconds;
+    if (warn !== this._lastTimeWarn) {
+      this._lastTimeWarn = warn;
+      this._view!.setTimeWarning(warn);
+    }
     const text = TimeFormatter.format(remaining);
     if (text === this._lastTime) return;
     this._lastTime = text;
@@ -59,6 +67,10 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
   }
 
   private _applyStatus(status: GameStatus): void {
+    if (status !== "playing") {
+      this._lastTimeWarn = false;
+      this._view!.setTimeWarning(false); // stop the blink once the game ends
+    }
     if (status === "won") this._view!.showResult("allClear");
     else if (status === "lost") this._view!.showResult(this._model!.lostReason === "time" ? "timeUp" : "gameOver");
     else {

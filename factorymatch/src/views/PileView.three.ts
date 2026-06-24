@@ -67,6 +67,8 @@ export class PileView extends WorldViewBase implements IPileView {
   /** Live comet-trail ribbons + the per-fly tweens that drive them. */
   private readonly _trails = new Set<TrailRibbon>();
   private readonly _trailTweens = new Set<gsap.core.Tween>();
+  /** Looping red blink on the last pad while only one tray slot is left. */
+  private _dangerTween: gsap.core.Tween | null = null;
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -221,6 +223,7 @@ export class PileView extends WorldViewBase implements IPileView {
       gsap.killTweensOf(pad.position);
       pad.position.y = this._padRestY;
     }
+    this.setTrayDanger(false); // clear any one-slot-left blink
   }
 
   public returnTrayItem(id: number, tx: number, ty: number, tz: number, onLanded: () => void): void {
@@ -575,6 +578,31 @@ export class PileView extends WorldViewBase implements IPileView {
   public setInteractive(enabled: boolean): void {
     this._interactive = enabled;
     if (!enabled) this._setHover(null);
+  }
+
+  /** Blink the last (rightmost) tray pad red as a one-slot-left warning, or stop
+   * + restore it. The blink rides the pad's emissive so the base colour is kept. */
+  public setTrayDanger(active: boolean): void {
+    const pad = this._pads[this._pads.length - 1];
+    if (!pad) return;
+    const mat = pad.material as THREE.MeshStandardMaterial;
+    if (active) {
+      if (this._dangerTween?.isActive()) return;
+      mat.emissive.setHex(this._config!.rack.dangerColor);
+      mat.emissiveIntensity = 0;
+      this._dangerTween = gsap.to(mat, {
+        emissiveIntensity: 1,
+        duration: this._config!.rack.dangerBlink,
+        ease: "sine.inOut",
+        yoyo: true,
+        repeat: -1,
+      });
+    } else {
+      this._dangerTween?.kill();
+      this._dangerTween = null;
+      mat.emissive.setHex(0x000000);
+      mat.emissiveIntensity = 0;
+    }
   }
 
   /** Swap the outlined shape (no-op if unchanged). Pass null to clear. */

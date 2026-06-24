@@ -402,6 +402,12 @@ export class FactoryOperations {
     this._springCharge = Math.min(b.springMatchCount, this._springCharge + 1);
   }
 
+  /** Empty tray slots remaining (capacity − collected). 1 = the danger state where
+   * the next non-matching pick fills the tray. */
+  public get slotsLeft(): number {
+    return this._config!.slots.capacity - this._slots.length;
+  }
+
   //  PER-FRAME / LIFECYCLE
 
   /** True while the pile should be simulated; the app gates `physics.step` on it. */

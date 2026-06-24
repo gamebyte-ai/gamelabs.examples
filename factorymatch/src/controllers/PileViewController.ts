@@ -33,6 +33,7 @@ export class PileViewController implements IViewController<IPileView> {
   private _lastComboFill = -1;
   private _lastFanFill = -1;
   private _lastSpringFill = -1;
+  private _lastDanger = false;
 
   public inject(resolver: IInstanceResolver): void {
     this._model = resolver.getInstance(IGameModel);
@@ -115,6 +116,12 @@ export class PileViewController implements IViewController<IPileView> {
       this._lastFanFill = fanFill;
       this._lastSpringFill = springFill;
       this._events!.emitBoosterChanged(fanFill, springFill);
+    }
+    // Warn on the last pad while exactly one tray slot is left (and still playing).
+    const danger = this._model!.status === "playing" && this._ops!.slotsLeft === 1;
+    if (danger !== this._lastDanger) {
+      this._lastDanger = danger;
+      this._view!.setTrayDanger(danger);
     }
   }
 

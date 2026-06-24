@@ -66,6 +66,7 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private _goText: PIXI.Text | null = null;
   private _countdownTl: gsap.core.Timeline | null = null;
   private _springPulse: gsap.core.Tween | null = null; // looping "use the spring" prompt
+  private _timeWarnTween: gsap.core.Tween | null = null; // looping last-seconds timer blink
   private _boosterDesignH = 1; // booster icon design height, for rescaling on texture swap
   private _w = 1;
   private _h = 1;
@@ -165,6 +166,27 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
 
   public setTime(text: string): void {
     this._timerValue.text = text;
+  }
+
+  /** Last-seconds warning: tint the timer red and loop an alpha blink, or restore. */
+  public setTimeWarning(active: boolean): void {
+    const t = this._timerValue;
+    if (active) {
+      if (this._timeWarnTween?.isActive()) return;
+      t.style.fill = this._config!.hud.timerWarnColor;
+      this._timeWarnTween = gsap.to(t, {
+        alpha: 0.2,
+        duration: this._config!.hud.timerBlink,
+        ease: "sine.inOut",
+        yoyo: true,
+        repeat: -1,
+      });
+    } else {
+      this._timeWarnTween?.kill();
+      this._timeWarnTween = null;
+      t.alpha = 1;
+      t.style.fill = 0xe8eef6; // back to the normal HUD text colour
+    }
   }
 
   public setGoal(index: number, count: number): void {
