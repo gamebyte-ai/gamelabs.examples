@@ -29,6 +29,8 @@ export class PileViewController implements IViewController<IPileView> {
   private _updateUnsub: Unsubscribe | null = null;
   private _lastScore = -1;
   private _lastStatus: GameStatus | null = null;
+  private _lastComboLevel = -1;
+  private _lastComboFill = -1;
 
   public inject(resolver: IInstanceResolver): void {
     this._model = resolver.getInstance(IGameModel);
@@ -56,6 +58,12 @@ export class PileViewController implements IViewController<IPileView> {
       }),
     );
     this._subs.add(this._events!.onFanActivated(() => this._ops!.activateFan()));
+    this._subs.add(
+      this._events!.onSpringActivated(() => {
+        const ret = this._ops!.returnLastItem();
+        if (ret) view.returnTrayItem(ret.id, ret.x, ret.y, ret.z, () => this._ops!.dropReturnedBody(ret.kind, ret.x, ret.y, ret.z));
+      }),
+    );
     this._updateUnsub = this._updateManager!.register((dt) => this._onUpdate(dt));
 
     this._ops!.buildLevel();
@@ -86,6 +94,15 @@ export class PileViewController implements IViewController<IPileView> {
     if (this._model!.status !== this._lastStatus) {
       this._lastStatus = this._model!.status;
       this._events!.emitStatusChanged(this._lastStatus);
+    }
+    // Combo ring drains every frame while live, so this fires per-frame during a
+    // combo and goes quiet once it idles back to x1.
+    const level = this._ops!.comboLevel;
+    const fill = this._ops!.comboFill;
+    if (level !== this._lastComboLevel || fill !== this._lastComboFill) {
+      this._lastComboLevel = level;
+      this._lastComboFill = fill;
+      this._events!.emitComboChanged(level, fill);
     }
   }
 

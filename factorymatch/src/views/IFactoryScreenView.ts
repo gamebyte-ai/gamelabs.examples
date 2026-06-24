@@ -10,10 +10,15 @@ export interface IFactoryScreenView extends IScreenView {
   setTime(text: string): void;
   setGoal(index: number, count: number): void;
   pulseGoal(index: number): void;
+  /** Update the combo multiplier badge: `level` is the x-factor (x1, x2, …) and
+   * `fill` (0→1) the progress ring around it. */
+  setCombo(level: number, fill: number): void;
   showResult(result: GameResult): void;
   hideBanner(): void;
   /** Play the 3-2-1-Go intro, calling `onDone` when it finishes. */
   playCountdown(onDone: () => void): void;
   /** Register a handler for taps on the fan booster button. */
   onFanTap(cb: () => void): Unsubscribe;
+  /** Register a handler for taps on the spring booster button. */
+  onSpringTap(cb: () => void): Unsubscribe;
 }

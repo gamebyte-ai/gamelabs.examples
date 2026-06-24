@@ -68,6 +68,11 @@ export class FactoryOperations {
   private _swirl = 0;
   /** Remaining count per goal (parallel to config.goals), counted down on collect. */
   private _goalRemaining: number[] = [];
+  /** Combo multiplier state: `_comboLevel` (≥1, the displayed x-factor) and
+   * `_comboFill` (0→1 progress around the current lap). Each match adds to the
+   * fill and multiplies match points; the fill drains every frame. */
+  private _comboLevel = 1;
+  private _comboFill = 0;
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
 
   public inject(resolver: IInstanceResolver): void {
@@ -95,6 +100,8 @@ export class FactoryOperations {
     this._timer!.reset();
     this._settle = this._config!.physics.initialSettleSeconds; // let the drop settle, then freeze
     this._goalRemaining = this._config!.goals.map((g) => g.target);
+    this._comboLevel = 1;
+    this._comboFill = 0;
 
     this._buildBin();
     this._buildPile();
@@ -155,24 +162,27 @@ export class FactoryOperations {
       // outside the bin and falls away.
       const limX = Math.max(0, cfg.bin.halfWidth - c.width / 2);
       const limZ = Math.max(0, cfg.bin.halfDepth - c.depth / 2);
-      const view = this._makeView!(kind);
-      const id = this._stage!.spawn(
-        {
-          shape: { kind: "box", width: c.width, height: c.height, depth: c.depth },
-          x: clamp((col - (cols - 1) / 2) * cell + rand(), limX),
-          y: baseY + layer * layerGap + rand(),
-          z: clamp((row - (rows - 1) / 2) * cell + rand(), limZ),
-          type: "dynamic",
-          mass: 1,
-          // friction/restitution come from the world default contact material
-          // (FactoryMatchConfig.physics) so item↔item contacts honour them too.
-          tag: kind,
-        },
-        view,
-      ).id;
-      this._pile.set(id, kind);
-      view.onSpawned?.(id); // let the view map this mesh → body for precise picking
+      this._spawnBody(
+        kind,
+        clamp((col - (cols - 1) / 2) * cell + rand(), limX),
+        baseY + layer * layerGap + rand(),
+        clamp((row - (rows - 1) / 2) * cell + rand(), limZ),
+      );
     });
+  }
+
+  /** Spawn one dynamic pile body of `kind` at (x,y,z) and pair it with a fresh
+   * view mesh. friction/restitution come from the world default contact material. */
+  private _spawnBody(kind: Kind, x: number, y: number, z: number): BodyId {
+    const c = this._config!.kinds[kind].collider;
+    const view = this._makeView!(kind);
+    const id = this._stage!.spawn(
+      { shape: { kind: "box", width: c.width, height: c.height, depth: c.depth }, x, y, z, type: "dynamic", mass: 1, tag: kind },
+      view,
+    ).id;
+    this._pile.set(id, kind);
+    view.onSpawned?.(id); // let the view map this mesh → body for precise picking
+    return id;
   }
 
   //  PICK — collect a specific pile body (chosen by the view's visual raycast)
@@ -184,6 +194,40 @@ export class FactoryOperations {
     if (this._model!.started) return;
     this._model!.setStarted(true);
     this._addLid();
+  }
+
+  /** Spring booster: take the most recently collected tray item out of the tray
+   * and pick a target inside the pool for it. The view flies the item there (over
+   * the tall walls), then calls back to `dropReturnedBody`. Returns the slot id +
+   * kind + target, or null if the tray is empty / not in play. */
+  public returnLastItem(): { id: number; kind: Kind; x: number; y: number; z: number } | null {
+    if (!this._model!.started || this._model!.status !== "playing") return null;
+    const item = this._slots.pop(); // last collected still in the tray
+    if (!item) return null;
+    const cfg = this._config!;
+    const s = cfg.spring;
+    const c = cfg.kinds[item.kind].collider;
+    const spread = (half: number, h: number): number =>
+      (Math.random() * 2 - 1) * Math.max(0, Math.min(s.scatter, half - h / 2));
+    return {
+      id: item.id,
+      kind: item.kind,
+      x: spread(cfg.bin.halfWidth, c.width),
+      y: cfg.bin.floorY + s.spawnHeight,
+      z: spread(cfg.bin.halfDepth, c.depth),
+    };
+  }
+
+  /** Spawn the returned item as a pile body at the release point the view flew it
+   * to, then THROW it into the pile: a hard downward launch plus a random
+   * horizontal kick so it tumbles in rather than being set down. */
+  public dropReturnedBody(kind: Kind, x: number, y: number, z: number): void {
+    if (!this._stage || !this._makeView) return; // torn down mid-flight
+    const s = this._config!.spring;
+    const id = this._spawnBody(kind, x, y, z);
+    const kick = (): number => (Math.random() * 2 - 1) * s.throwKick;
+    this._physics!.setVelocity(id, kick(), -s.throwSpeed, kick());
+    this._settle = Math.max(this._settle, s.settle); // let it crash in + the pile resettle
   }
 
   /** Fan booster: spin the pile into a clockwise tornado for a few seconds. */
@@ -234,6 +278,8 @@ export class FactoryOperations {
 
     const addedId = this._nextItemId++;
     this._slots.push({ id: addedId, kind });
+    // All score gains scale with the live combo multiplier (x1 = neutral, x2+ boosts).
+    this._model!.setScore(this._model!.score + cfg.slots.collectPoints * this._comboLevel); // points for taking it into the tray
 
     // Count this collection against its goal (if any), once per single pickup.
     let goal: { index: number; remaining: number } | null = null;
@@ -249,7 +295,10 @@ export class FactoryOperations {
       clearedIds = sameIds.slice(-cfg.slots.matchCount);
       const cleared = new Set(clearedIds);
       this._slots = this._slots.filter((s) => !cleared.has(s.id));
-      this._model!.setScore(this._model!.score + cfg.slots.matchPoints);
+      // Match points scale with the current combo level (x1, x2, …); then this
+      // match feeds the combo ring (which may bump the level for the next match).
+      this._model!.setScore(this._model!.score + cfg.slots.matchPoints * this._comboLevel);
+      this._addCombo();
     }
 
     // Win on an empty pile; otherwise lose the moment the tray fills with no room
@@ -258,6 +307,43 @@ export class FactoryOperations {
     else if (this._slots.length >= cfg.slots.capacity) this._model!.setLost("tray");
 
     return { addedId, kind, from, clearedIds, goal };
+  }
+
+  //  COMBO MULTIPLIER
+
+  /** Current combo multiplier (the displayed x-factor, ≥1). */
+  public get comboLevel(): number {
+    return this._comboLevel;
+  }
+  /** Ring fill of the current lap (0→1). */
+  public get comboFill(): number {
+    return this._comboFill;
+  }
+
+  /** A match feeds the ring: add a step, and roll over to the next level (carrying
+   * the remainder) for every full lap completed. */
+  private _addCombo(): void {
+    this._comboFill += this._config!.combo.step;
+    while (this._comboFill >= 1) {
+      this._comboFill -= 1;
+      this._comboLevel += 1;
+    }
+  }
+
+  /** Drain the ring over time. Draining a full lap drops a level (the ring wraps
+   * to full in the lower colour); at level 1 it bottoms out and the combo ends. */
+  private _decayCombo(dt: number): void {
+    if (this._comboLevel <= 1 && this._comboFill <= 0) return; // idle — nothing to drain
+    this._comboFill -= this._config!.combo.decayPerSecond * dt;
+    while (this._comboFill < 0) {
+      if (this._comboLevel > 1) {
+        this._comboLevel -= 1;
+        this._comboFill += 1;
+      } else {
+        this._comboFill = 0; // x1 floor — combo over
+        break;
+      }
+    }
   }
 
   //  PER-FRAME / LIFECYCLE
@@ -276,6 +362,7 @@ export class FactoryOperations {
     if (!this._model!.started || this._model!.status !== "playing") return;
     this._timer!.tick(dt);
     if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
+    this._decayCombo(dt); // the combo ring drains continuously while playing
 
     // Per-body forces while the pile is simulated: the gravity correction (drop →
     // after-start), plus the fan booster's clockwise tornado when active.

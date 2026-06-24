@@ -48,11 +48,13 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _scoreCaption = this._makeText(13, 0x9fb0c3, "700");
   private readonly _multiplier = new PIXI.Container();
   private readonly _multiplierValue = this._makeText(20, 0xe8eef6, "800");
+  private readonly _comboRing = new PIXI.Graphics();
   private readonly _goals: PIXI.Container[] = [];
   private readonly _goalValues: PIXI.Text[] = [];
   private readonly _boosterFan = new PIXI.Sprite();
   private readonly _boosterSpring = new PIXI.Sprite();
   private readonly _fanListeners = new Set<() => void>();
+  private readonly _springListeners = new Set<() => void>();
 
   private readonly _banner = new PIXI.Sprite();
   // Intro countdown: a number sprite (3/2/1) and a "Go" text, centred + popped.
@@ -84,8 +86,11 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._topBar.addChild(this._timer, this._score, this._timerCaption, this._scoreCaption);
 
     this._buildBadge(this._multiplier, this._multiplierValue, FactoryMatchAssetIds.MultiplierBg, MULT_H);
-    this._multiplierValue.text = "x1";
+    // Combo ring sits over the badge bg but under the value text.
+    this._multiplier.addChild(this._comboRing);
+    this._multiplier.setChildIndex(this._multiplierValue, this._multiplier.children.length - 1);
     this._topBar.addChild(this._multiplier);
+    this.setCombo(1, 0);
 
     for (const goal of this._config!.goals) {
       const chip = new PIXI.Container();
@@ -115,11 +120,16 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._initBooster(this._boosterSpring, FactoryMatchAssetIds.BoosterSpring, boosterH);
     this._bottomBar.addChild(this._boosterFan, this._boosterSpring);
 
-    // The fan booster is tappable; other UI stays pass-through.
+    // The booster buttons are tappable; other UI stays pass-through.
     this._boosterFan.eventMode = "static";
     this._boosterFan.cursor = "pointer";
     this._boosterFan.on("pointertap", () => {
       for (const cb of this._fanListeners) cb();
+    });
+    this._boosterSpring.eventMode = "static";
+    this._boosterSpring.cursor = "pointer";
+    this._boosterSpring.on("pointertap", () => {
+      for (const cb of this._springListeners) cb();
     });
 
     this._layoutDesign();
@@ -173,6 +183,26 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     });
   }
 
+  /** Update the multiplier label + redraw the progress ring: a faint full-circle
+   * track plus a fill arc that sweeps clockwise from 12 o'clock, coloured by the
+   * level (palette cycles, so each lap shows in the next colour). */
+  public setCombo(level: number, fill: number): void {
+    this._multiplierValue.text = "x" + level;
+    const c = this._config!.combo;
+    const color = c.palette[(level - 1) % c.palette.length] ?? c.palette[0]!;
+    const g = this._comboRing;
+    g.clear();
+    g.circle(0, 0, c.ringRadius).stroke({ width: c.ringWidth, color: c.trackColor, alpha: c.trackAlpha });
+    if (fill > 0) {
+      const start = (c.startAngle * Math.PI) / 180;
+      const end = start + Math.min(fill, 1) * Math.PI * 2; // y-down → increasing angle sweeps clockwise
+      // moveTo the arc's start first, or the path draws a spoke from the centre to it.
+      g.moveTo(Math.cos(start) * c.ringRadius, Math.sin(start) * c.ringRadius);
+      g.arc(0, 0, c.ringRadius, start, end);
+      g.stroke({ width: c.ringWidth, color, alpha: 1, cap: "round" });
+    }
+  }
+
   public showResult(result: GameResult): void {
     const texture = this.assetLoader.getAsset<PIXI.Texture>(RESULT_ASSET[result]);
     if (!texture) return;
@@ -188,6 +218,11 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   public onFanTap(cb: () => void): Unsubscribe {
     this._fanListeners.add(cb);
     return () => this._fanListeners.delete(cb);
+  }
+
+  public onSpringTap(cb: () => void): Unsubscribe {
+    this._springListeners.add(cb);
+    return () => this._springListeners.delete(cb);
   }
 
   public playCountdown(onDone: () => void): void {

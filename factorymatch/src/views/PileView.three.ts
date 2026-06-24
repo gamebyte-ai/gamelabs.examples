@@ -217,6 +217,69 @@ export class PileView extends WorldViewBase implements IPileView {
     }
   }
 
+  public returnTrayItem(id: number, tx: number, ty: number, tz: number, onLanded: () => void): void {
+    const slot = this._slots.get(id);
+    if (!slot) {
+      onLanded(); // mesh already gone — still spawn the pile body
+      return;
+    }
+    const cfg = this._config!;
+    const s = cfg.spring;
+    const index = slot.index;
+    const obj = slot.obj;
+    this._slots.delete(id);
+    this._order = this._order.filter((o) => o !== id);
+    // The block springs STRAIGHT UP out of the tray first, then arcs over the
+    // walls to the pool target: x/z hold during the jump and only glide across
+    // once it's airborne. It grows from tray (quarter) size back to full pile size
+    // on the way in.
+    gsap.killTweensOf(obj.position);
+    gsap.killTweensOf(obj.scale);
+    gsap.killTweensOf(obj.rotation);
+    const peakY = Math.max(obj.position.y, ty) + s.arcLift;
+    const up = s.flyTime * Math.min(Math.max(s.jumpRatio, 0), 1); // jump-up phase
+    const over = s.flyTime - up; // travel-to-pool phase
+    gsap.to(obj.position, {
+      keyframes: [
+        { y: peakY, duration: up, ease: "power3.out" }, // punchy spring straight up
+        { y: ty, duration: over, ease: "power2.in" }, // arc back down into the pool target
+      ],
+    });
+    gsap.to(obj.position, {
+      x: tx,
+      z: tz,
+      duration: over,
+      delay: up, // hold over the tray through the jump, then fly across
+      ease: "power1.in",
+      // When the flight lands, drop the flown mesh and hand off to physics: a real
+      // pile body spawns at the same spot and is thrown into the pile.
+      onComplete: () => {
+        PileView._disposeObject(obj);
+        onLanded();
+      },
+    });
+    gsap.to(obj.scale, { x: 1, y: 1, z: 1, duration: s.flyTime, ease: "power2.in" });
+    // Close the gap first (neighbours shift in), then spring the vacated pad UP to
+    // sell the launch — applied last so it wins over any neighbour landing on it.
+    this._layout(null);
+    if (index >= 0) this._springPad(index);
+  }
+
+  /** Spring a tray pad sharply UPWARD then settle it back — the catapult recoil
+   * that launches a spring-boosted block out of the tray. */
+  private _springPad(index: number): void {
+    const pad = this._pads[index];
+    if (!pad) return;
+    const s = this._config!.spring;
+    gsap.killTweensOf(pad.position);
+    gsap.to(pad.position, {
+      keyframes: [
+        { y: this._padRestY + s.padJump, duration: s.padJumpTime, ease: "back.out(3)" }, // pop up
+        { y: this._padRestY, duration: s.padJumpTime, ease: "power2.in" }, // settle back to rest
+      ],
+    });
+  }
+
   /** Group by kind (stable), then animate every slotted shape to its rack position. */
   private _layout(flownId: number | null): void {
     const cfg = this._config!;

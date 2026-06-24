@@ -41,7 +41,7 @@ export class FactoryMatchConfig {
     halfDepth: 1.4, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
-    wallHeight: 10.0, // visible glass-wall height
+    wallHeight: 11.0, // visible glass-wall height
     wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.5,
     wallColor: 0x3b4250,
@@ -63,7 +63,7 @@ export class FactoryMatchConfig {
     itemLift: 0.15, // raises the seated item so its base rests on the pad (anchor is its center, not its base)
     arcLift: 1.5, // collected item hops this high (world units) above its start/end before landing in the tray
     shiftHop: 1.8, // how high a seated item hops while sliding to a new slot on reorder (world units)
-    suspensionDip: 0.5, // how far the pad + landed item sink on impact before springing back (world units)
+    suspensionDip: 0.7, // how far the pad + landed item sink on impact before springing back (world units)
     matchLift: 1.8, // how high a matched shape rises off the rack before collapsing (world units)
     matchGrow: 1.5, // peak scale of a matched shape during the rise, as a multiple of itemScale
     // Tray sizing (world units). Slot pitch = padWidth + gap; the full row spans
@@ -92,7 +92,7 @@ export class FactoryMatchConfig {
    * longer tail); `width` its world-space thickness; `color`/`opacity` its look.
    * After the item lands, the tail catches up to the head over `fade` seconds, so
    * the ribbon vanishes from its origin toward the item (not a whole-strip fade). */
-  public readonly trail = { enabled: true, color: 0xffffff, width: 0.1, points: 6, opacity: 0.9, fade: 0.18 };
+  public readonly trail = { enabled: true, color: 0xffffff, width: 0.1, points: 6, opacity: 0.8, fade: 0.1 };
 
   public readonly kinds: Record<Kind, KindDef> = {
     dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
@@ -125,9 +125,9 @@ export class FactoryMatchConfig {
   public readonly spawnPerKind: Record<Kind, number> = {
     dice: 18,
     billardball: 18,
-    guitar: 24,
+    guitar: 27,
     radio: 18,
-    gascan: 30,
+    gascan: 33,
   };
   /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
    * bin (so they spawn together as a compact cloud, not a tall column): `cell` is
@@ -168,8 +168,29 @@ export class FactoryMatchConfig {
     goText: "GO!",
   };
 
-  /** Slot tray: collect identical shapes; matchCount of a kind clears + scores. */
-  public readonly slots = { capacity: 7, matchCount: 3, matchPoints: 10 };
+  /** Slot tray: collect identical shapes; matchCount of a kind clears + scores.
+   * `collectPoints` is scored per pick (every item taken into the tray);
+   * `matchPoints` is scored on each 3-of-a-kind clear. */
+  public readonly slots = { capacity: 7, matchCount: 3, collectPoints: 10, matchPoints: 30 };
+
+  /** Combo multiplier ring around the multiplier badge. Each match adds `step` to
+   * the ring's fill (fraction of a full lap); the fill drains continuously at
+   * `decayPerSecond`. Every full lap bumps the level (x1 → x2 → x3 …), wraps the
+   * ring back to empty in the next palette colour, and multiplies match points by
+   * the new level. When the ring drains a full lap it drops a level; at x1 it
+   * empties out and the combo ends. `palette` cycles per level (level N uses
+   * palette[(N-1) % len]). `ringRadius`/`ringWidth`/`startAngle` are design px /
+   * degrees (the ring is drawn inside the badge, which scales with the screen). */
+  public readonly combo = {
+    step: 0.78, // fill added per match (1 = a whole lap in one match)
+    decayPerSecond: 0.22, // fill drained per second while a combo is live
+    ringRadius: 34, // ring radius around the badge (design px @ refWidth)
+    ringWidth: 6, // ring stroke thickness (design px)
+    startAngle: -90, // 12 o'clock; the fill sweeps clockwise from here
+    trackColor: 0x1c2430, // faint full-circle track behind the fill
+    trackAlpha: 0.55,
+    palette: [0x49d17a, 0x3fa9f5, 0xb061f0, 0xff9f43, 0xff5b5b], // per-level colour cycle
+  };
 
   /** Minimum delay between picks (seconds): after collecting an item, further
    * picks are ignored until this elapses (prevents rapid multi-collect). */
@@ -193,6 +214,28 @@ export class FactoryMatchConfig {
     height: 25,
     ramp: 0.6,
     direction: 1,
+  };
+
+  /** Spring booster: tapping it flings the last collected item from the tray back
+   * into the pool. The tray block first JUMPS straight up out of the tray (the
+   * first `jumpRatio` of `flyTime`, springing to `arcLift` world units above its
+   * start), then arcs over the walls to a release point inside the pool —
+   * `spawnHeight` above the floor, within `scatter` of the centre. There a pile
+   * body spawns and is THROWN in: launched hard downward at `throwSpeed` with a
+   * random horizontal `throwKick` so it tumbles into the pile rather than being
+   * set down. Physics stays on for `settle` seconds so it crashes in and the pile
+   * resettles. */
+  public readonly spring = {
+    spawnHeight: 4.5,
+    throwSpeed: 6,
+    throwKick: 2,
+    scatter: 2,
+    settle: 1.5,
+    flyTime: 0.45,
+    arcLift: 2.5,
+    jumpRatio: 0.4, // fraction of flyTime the block springs STRAIGHT UP before it travels to the pool (0 = no jump, just a flat arc)
+    padJump: 0.6, // how high the vacated tray pad springs UP (world units) as it launches the block — the catapult recoil
+    padJumpTime: 0.18, // duration of the pad's spring up (and, symmetrically, its settle back) in seconds
   };
 
   /** Countdown clock shown top-centre. `startSeconds` is the time the player has;

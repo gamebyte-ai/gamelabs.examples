@@ -18,6 +18,11 @@ export interface IPileView extends IView {
   /** Remove all slotted shapes (on restart). */
   clearSlots(): void;
 
+  /** Spring booster: fly the given tray item out of the tray and arc it over the
+   * walls to the pool target (x,y,z), bounce the tray, and close the gap. When the
+   * flight lands, `onLanded` is called so the pile body can be spawned there. */
+  returnTrayItem(id: number, x: number, y: number, z: number, onLanded: () => void): void;
+
   /** A pointer click: the picked pile body id, or null if none was under the pointer. */
   onPick(cb: (bodyId: number | null) => void): Unsubscribe;
 
