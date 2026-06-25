@@ -84,6 +84,7 @@ export class PileViewController implements IViewController<IPileView> {
     const result = this._ops!.pick(bodyId);
     if (result) {
       this._view!.applyCollect(result);
+      this._view!.showWakeColumn(result.from.x, result.from.z); // flash the woken column
       if (result.goal) this._events!.emitGoalChanged(result.goal.index, result.goal.remaining);
     }
     // A full tray held open by a charged spring: nudge the player to use it.

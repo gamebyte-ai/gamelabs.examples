@@ -33,4 +33,8 @@ export interface IPileView extends IView {
   /** Blink the last (rightmost) tray pad red while only one slot is left (danger),
    * off otherwise. */
   setTrayDanger(active: boolean): void;
+
+  /** Flash the translucent wake cylinder at the picked column (x,z) — shows which
+   * items a pick woke. No-op when the visual is disabled in config. */
+  showWakeColumn(x: number, z: number): void;
 }

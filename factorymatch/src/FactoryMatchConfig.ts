@@ -149,15 +149,32 @@ export class FactoryMatchConfig {
    * `restitution` is the bounce [0,1]; `friction` resists sliding. */
   public readonly physics = {
     gravity: -10.82,
-    gravityAfterStart: -7.82,
+    gravityAfterStart: -10.82,
     restitution: 0,
     friction: 0.01,
-    // The pile is simulated only in short bursts, then frozen, so idle items
-    // don't jitter forever. `settleSeconds` is the physics-on window after each
-    // pick; `initialSettleSeconds` is the longer window after a (re)build so the
-    // first drop has time to come to rest before freezing.
-    settleSeconds:0.5,
-    initialSettleSeconds:4,
+    // The pile is simulated in short per-body bursts, then those bodies sleep, so
+    // idle items don't jitter. `settleSeconds` is the wake window after a pick;
+    // `initialSettleSeconds` is the longer window after a (re)build so the first
+    // drop has time to come to rest before sleeping.
+    settleSeconds: 0.5,
+    initialSettleSeconds: 4,
+  };
+
+  /** A pick wakes only the items a vertical CYLINDER touches — a column standing on
+   * the picked item's (x,z), `radius` wide and `height` tall (from the floor up),
+   * so the stack above the gap falls in while everything outside stays asleep (and
+   * can't jitter). Distance is horizontal only; vertical span is floor → floor+height.
+   * `max` caps how many (nearest first) wake — 0 = no cap. When `show` is on, a
+   * translucent cylinder is drawn at the pick for `fadeSeconds` so the wake volume
+   * is visible (a tuning aid); `color`/`opacity` style it. */
+  public readonly pickWake = {
+    radius: 0.3,
+    height: 4,
+    max: 0,
+    show: false,
+    color: 0x49d1ff,
+    opacity: 0.18,
+    fadeSeconds: 0.4,
   };
 
   /** Start-of-game intro: a 3-2-1 countdown (using the number assets) then "Go!".
@@ -190,7 +207,7 @@ export class FactoryMatchConfig {
     decayPerSecond: 0.22, // fill drained per second while a combo is live
     ringRadius: 34, // ring radius around the badge (design px @ refWidth)
     ringWidth: 6, // ring stroke thickness (design px)
-    startAngle: -90, // 12 o'clock; the fill sweeps clockwise from here
+    startAngle: 90, // 6 o'clock (bottom); the fill sweeps clockwise from here
     trackColor: 0x1c2430, // faint full-circle track behind the fill
     trackAlpha: 0.55,
     palette: [0x49d17a, 0x3fa9f5, 0xb061f0, 0xff9f43, 0xff5b5b], // per-level colour cycle

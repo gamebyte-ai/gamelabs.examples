@@ -69,6 +69,9 @@ export class PileView extends WorldViewBase implements IPileView {
   private readonly _trailTweens = new Set<gsap.core.Tween>();
   /** Looping red blink on the last pad while only one tray slot is left. */
   private _dangerTween: gsap.core.Tween | null = null;
+  /** Translucent cylinder flashed at a pick to show the woken column. */
+  private _wakeCylinder: THREE.Mesh | null = null;
+  private _wakeCylinderTween: gsap.core.Tween | null = null;
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -90,6 +93,7 @@ export class PileView extends WorldViewBase implements IPileView {
 
     this._buildBinVisual();
     this._buildRackVisual();
+    this._buildWakeCylinder();
     this.add(this._bin, this._rack);
 
     const canvas = this._world?.renderer.domElement;
@@ -580,6 +584,48 @@ export class PileView extends WorldViewBase implements IPileView {
     if (!enabled) this._setHover(null);
   }
 
+  /** Build the translucent wake-volume cylinder (matches `pickWake` radius/height),
+   * hidden until a pick flashes it. */
+  private _buildWakeCylinder(): void {
+    const pw = this._config!.pickWake;
+    if (!pw.show) return;
+    const geo = new THREE.CylinderGeometry(pw.radius, pw.radius, pw.height, 24, 1, true);
+    const mat = new THREE.MeshBasicMaterial({
+      color: pw.color,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false;
+    mesh.raycast = (): void => {}; // never intercept picks
+    this._wakeCylinder = mesh;
+    this.add(mesh);
+  }
+
+  /** Flash the wake cylinder at the picked column, fading it out — a tuning aid
+   * showing which items the pick woke. */
+  public showWakeColumn(x: number, z: number): void {
+    const mesh = this._wakeCylinder;
+    if (!mesh) return; // visual disabled
+    const pw = this._config!.pickWake;
+    const floorY = this._config!.bin.floorY;
+    mesh.position.set(x, floorY + pw.height / 2, z);
+    mesh.visible = true;
+    const mat = mesh.material as THREE.MeshBasicMaterial;
+    this._wakeCylinderTween?.kill();
+    mat.opacity = pw.opacity;
+    this._wakeCylinderTween = gsap.to(mat, {
+      opacity: 0,
+      duration: pw.fadeSeconds,
+      ease: "power2.out",
+      onComplete: () => {
+        mesh.visible = false;
+      },
+    });
+  }
+
   /** Blink the last (rightmost) tray pad red as a one-slot-left warning, or stop
    * + restore it. The blink rides the pad's emissive so the base colour is kept. */
   public setTrayDanger(active: boolean): void {
@@ -751,6 +797,8 @@ export class PileView extends WorldViewBase implements IPileView {
     this._pileObjects.clear();
     this._bodyByObject.clear();
     this.clearSlots();
+    this._wakeCylinderTween?.kill();
+    if (this._wakeCylinder) PileView._disposeObject(this._wakeCylinder);
     PileView._disposeObject(this._bin);
     PileView._disposeObject(this._rack);
     if (this._world) {
