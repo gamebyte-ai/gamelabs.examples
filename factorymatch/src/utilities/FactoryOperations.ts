@@ -86,6 +86,7 @@ export class FactoryOperations {
    * the controller reads + clears it to pulse the spring booster as a prompt. */
   private _springPromptPending = false;
   private readonly _t: Transform3D = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
+  private readonly _v = { x: 0, y: 0, z: 0 }; // scratch for velocity reads
 
   public inject(resolver: IInstanceResolver): void {
     this._physics = resolver.getInstance(Physics3DManager);
@@ -194,12 +195,39 @@ export class FactoryOperations {
     const c = this._config!.kinds[kind].collider;
     const view = this._makeView!(kind);
     const id = this._stage!.spawn(
-      { shape: { kind: "box", width: c.width, height: c.height, depth: c.depth }, x, y, z, type: "dynamic", mass: 1, tag: kind },
+      {
+        shape: { kind: "box", width: c.width, height: c.height, depth: c.depth },
+        x,
+        y,
+        z,
+        rotation: this._spawnRotation(),
+        type: "dynamic",
+        mass: 1,
+        tag: kind,
+      },
       view,
     ).id;
     this._pile.set(id, kind);
     view.onSpawned?.(id); // let the view map this mesh → body for precise picking
     return id;
+  }
+
+  /** A random spawn orientation: a multiple of `spawn.spinStepDegrees` about
+   * `spawn.spinAxis`, so identical models don't all line up the same way.
+   * Returns identity when the step is 0 (disabled). */
+  private _spawnRotation(): { x: number; y: number; z: number; w: number } {
+    const { spinAxis, spinStepDegrees } = this._config!.spawn;
+    if (spinStepDegrees <= 0) return { x: 0, y: 0, z: 0, w: 1 };
+    const steps = Math.max(1, Math.round(360 / spinStepDegrees));
+    const angle = (Math.floor(Math.random() * steps) * spinStepDegrees * Math.PI) / 180;
+    const s = Math.sin(angle / 2);
+    const cw = Math.cos(angle / 2);
+    return {
+      x: spinAxis === "x" ? s : 0,
+      y: spinAxis === "y" ? s : 0,
+      z: spinAxis === "z" ? s : 0,
+      w: cw,
+    };
   }
 
   //  WAKE — which bodies get simulated (everything else sleeps, so it can't jitter)
@@ -223,13 +251,14 @@ export class FactoryOperations {
   }
 
   /** Wake the pile bodies a vertical cylinder touches — radius `pickWake.radius`
-   * around (cx,cz), from the floor up to `pickWake.height` — so the column above
-   * the gap resettles. Horizontal distance only; capped to the nearest `max`. */
-  private _wakeColumn(cx: number, cz: number, seconds: number): void {
+   * around (cx,cz), with its BASE at the pick (cy) rising `pickWake.height` — so
+   * the picked item and the stack ABOVE it resettle while everything below stays
+   * asleep (it's the support). Horizontal distance only; capped to `max`. */
+  private _wakeColumn(cx: number, cy: number, cz: number, seconds: number): void {
     const pw = this._config!.pickWake;
     const r2 = pw.radius * pw.radius;
-    const yMin = this._config!.bin.floorY;
-    const yMax = yMin + pw.height;
+    const yMin = cy;
+    const yMax = cy + pw.height;
     const hits: { id: BodyId; d2: number }[] = [];
     for (const id of this._pile.keys()) {
       const t = this._physics!.getTransform(id, this._t);
@@ -293,7 +322,7 @@ export class FactoryOperations {
     this._pickLock.set(id, s.pickLock); // not re-pickable until it has dropped into the pool
     // Wake the dropped item + the column it lands in, then let them sleep.
     this._wakeBody(id, s.settle);
-    this._wakeColumn(x, z, s.settle);
+    this._wakeColumn(x, y, z, s.settle);
   }
 
   /** Fan booster: spin the pile into a clockwise tornado for a few seconds. */
@@ -353,9 +382,9 @@ export class FactoryOperations {
     this._stage!.despawn(bodyId); // collider off — the shape leaves the simulation
     this._pile.delete(bodyId);
     this._active.delete(bodyId); // it's gone — drop any wake window it held
-    // Wake only the vertical column over the gap so it resettles in; the rest of
-    // the pile stays asleep (no global jitter). Never shortens a body's window.
-    this._wakeColumn(from.x, from.z, cfg.physics.settleSeconds);
+    // Wake only the vertical column centred on the gap so it resettles in; the
+    // rest of the pile stays asleep (no global jitter). Never shortens a window.
+    this._wakeColumn(from.x, from.y, from.z, cfg.physics.settleSeconds);
     this._pickCooldown = cfg.pickCooldown; // block the next pick briefly
 
     const addedId = this._nextItemId++;
@@ -498,6 +527,21 @@ export class FactoryOperations {
     if (this._active.size > 0) {
       for (const id of this._pile.keys()) {
         if (!this._active.has(id)) this._physics!.sleep(id);
+      }
+    }
+    // Speed cap: rein in any awake body the step over-accelerated (squeeze/collision
+    // ejections, worst at the packed initial drop). Runs pre-playing too, so the
+    // opening drop is capped. Scales velocity back to maxSpeed, keeping direction.
+    const maxSpeed = this._config!.physics.maxSpeed;
+    if (maxSpeed > 0 && this._active.size > 0) {
+      const max2 = maxSpeed * maxSpeed;
+      for (const id of this._active.keys()) {
+        const v = this._physics!.getVelocity(id, this._v);
+        const sp2 = v.x * v.x + v.y * v.y + v.z * v.z;
+        if (sp2 > max2) {
+          const k = maxSpeed / Math.sqrt(sp2);
+          this._physics!.setVelocity(id, v.x * k, v.y * k, v.z * k);
+        }
       }
     }
     if (this._pickCooldown > 0) this._pickCooldown = Math.max(0, this._pickCooldown - dt); // burn down the pick cooldown

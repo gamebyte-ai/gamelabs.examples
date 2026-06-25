@@ -41,7 +41,7 @@ export class FactoryMatchConfig {
     halfDepth: 1.6, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
-    wallHeight: 13.0, // visible glass-wall height
+    wallHeight: 22.0, // visible glass-wall height
     wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.5,
     wallColor: 0x3b4250,
@@ -59,7 +59,7 @@ export class FactoryMatchConfig {
     y: 2.32,
     itemScale: 0.6,
     itemRotationY: 25,
-    tiltX: -40,
+    tiltX: -32, // counter-rotated for the lowered camera (was -40 at the ~top-down angle); keeps the tray's apparent tilt the same — re-tune alongside camera.position.z
     itemLift: 0.15, // raises the seated item so its base rests on the pad (anchor is its center, not its base)
     arcLift: 1.5, // collected item hops this high (world units) above its start/end before landing in the tray
     shiftHop: 1.8, // how high a seated item hops while sliding to a new slot on reorder (world units)
@@ -75,6 +75,7 @@ export class FactoryMatchConfig {
     padColor: 0x222831,
     dangerColor: 0x830000, // the last (rightmost) pad blinks this when only one tray slot is left
     dangerBlink: 0.4, // half-period of that warning blink (seconds)
+    show: true, // false hides the tray rack + skips the fly-to-tray (picks just clear the item) — test toggle
   };
 
   /** Animation durations (seconds). `matchRise`/`matchCollapse` are the two
@@ -127,11 +128,11 @@ export class FactoryMatchConfig {
   /** How many of each kind to drop into the bin, per kind (keep each a multiple of
    * matchCount → fully clearable). */
   public readonly spawnPerKind: Record<Kind, number> = {
-    dice: 24,
-    billardball: 30,
-    guitar: 30,
-    radio: 33,
-    gascan: 42,
+    dice: 54,
+    billardball: 54,
+    guitar: 69,
+    radio: 54,
+    gascan: 75,
   };
   /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
    * bin (so they spawn together as a compact cloud, not a tall column): `cell` is
@@ -139,7 +140,18 @@ export class FactoryMatchConfig {
    * vertical gap between stacked layers, `baseY` the lowest layer, and `jitter` a
    * small random offset per axis for a natural look. Total drop height stays low —
    * a handful of layers regardless of item count. */
-  public readonly spawn = { cell: 0.4, layerGap: 0.3, baseY: 3.5, jitter: 0.5 };
+  public readonly spawn = {
+    cell: 0.4,
+    layerGap: 0.3,
+    baseY: 3.5,
+    jitter: 0.5,
+    // Each item spawns rotated by a RANDOM multiple of `spinStepDegrees` about the
+    // `spinAxis`, so identical models (e.g. guitars) don't all line up the same
+    // way. 90° → one of 0/90/180/270. Set spinStepDegrees to 0 to disable. The box
+    // colliders are symmetric, so this only changes how the items look.
+    spinAxis: "z" as "x" | "y" | "z",
+    spinStepDegrees: 90,
+  };
 
   /** World physics (applied to ALL contacts via the engine's default contact
    * material, so it governs item↔item piling, not just item↔floor). `gravity` is
@@ -151,13 +163,19 @@ export class FactoryMatchConfig {
     gravity: -10.82,
     gravityAfterStart: -10.82,
     restitution: 0,
-    friction: 0.01,
+    friction: 0.04,
     // The pile is simulated in short per-body bursts, then those bodies sleep, so
     // idle items don't jitter. `settleSeconds` is the wake window after a pick;
     // `initialSettleSeconds` is the longer window after a (re)build so the first
     // drop has time to come to rest before sleeping.
     settleSeconds: 0.5,
     initialSettleSeconds: 4,
+    // Hard cap on how fast any awake item may move (world units/sec). Squeezes +
+    // collisions (especially the initial drop into a packed bin) can otherwise
+    // fling items at huge speeds; each frame an over-speed body's velocity is
+    // scaled back to this. 0 = no cap. Normal free-fall here is ~9, so keep it a
+    // bit above that.
+    maxSpeed: 11,
   };
 
   /** A pick wakes only the items a vertical CYLINDER touches — a column standing on
@@ -168,12 +186,12 @@ export class FactoryMatchConfig {
    * translucent cylinder is drawn at the pick for `fadeSeconds` so the wake volume
    * is visible (a tuning aid); `color`/`opacity` style it. */
   public readonly pickWake = {
-    radius: 0.3,
-    height: 4,
+    radius: 0.33,
+    height: 7,
     max: 0,
-    show: false,
+    show: true,
     color: 0x49d1ff,
-    opacity: 0.18,
+    opacity: 0.28,
     fadeSeconds: 0.4,
   };
 
@@ -336,7 +354,11 @@ export class FactoryMatchConfig {
    * `minAspect` stays at `frustumAtMin`. Narrow screens want a TALLER frustum to
    * fit the pool width, so `frustumAtMin` is usually larger than `frustumAtMax`. */
   public readonly camera = {
-    position: { x: 0, y: 28.6, z: 2.2 },
+    // Lowered toward the front (bigger z than the ~straight-down original) so the
+    // pile is viewed at a shallower angle — front items overlap the back ones and
+    // hide the floor gaps. Raising z tilts further; the tray's `rack.tiltX` is
+    // counter-rotated by the same amount so the tray's look is unchanged.
+    position: { x: 0, y: 98.6, z: 3.3 },
     lookAt: { x: 0, y: 0.85, z: 0.1 },
     orthographic: true,
     zoom: {

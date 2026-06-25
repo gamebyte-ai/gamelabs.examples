@@ -92,7 +92,7 @@ export class PileView extends WorldViewBase implements IPileView {
     this._setupCamera();
 
     this._buildBinVisual();
-    this._buildRackVisual();
+    if (this._config!.rack.show) this._buildRackVisual();
     this._buildWakeCylinder();
     this.add(this._bin, this._rack);
 
@@ -176,6 +176,7 @@ export class PileView extends WorldViewBase implements IPileView {
   //  SLOT RACK — collected shapes fly here and line up
 
   public applyCollect(result: CollectResult): void {
+    if (!this._config!.rack.show) return; // tray disabled (test): the picked item just clears, nothing flies
     // Spawn the collected shape at the pile pose + full size; it shrinks to
     // `itemScale` (a quarter) as it flies to the slot (animated in _layout).
     const obj = this._makeShape(result.kind);
@@ -606,12 +607,11 @@ export class PileView extends WorldViewBase implements IPileView {
 
   /** Flash the wake cylinder at the picked column, fading it out — a tuning aid
    * showing which items the pick woke. */
-  public showWakeColumn(x: number, z: number): void {
+  public showWakeColumn(x: number, y: number, z: number): void {
     const mesh = this._wakeCylinder;
     if (!mesh) return; // visual disabled
     const pw = this._config!.pickWake;
-    const floorY = this._config!.bin.floorY;
-    mesh.position.set(x, floorY + pw.height / 2, z);
+    mesh.position.set(x, y + pw.height / 2, z); // base sits at the pick, rising up — matches the wake volume
     mesh.visible = true;
     const mat = mesh.material as THREE.MeshBasicMaterial;
     this._wakeCylinderTween?.kill();

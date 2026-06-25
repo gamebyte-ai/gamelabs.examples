@@ -34,7 +34,7 @@ export interface IPileView extends IView {
    * off otherwise. */
   setTrayDanger(active: boolean): void;
 
-  /** Flash the translucent wake cylinder at the picked column (x,z) — shows which
+  /** Flash the translucent wake cylinder centred on the pick (x,y,z) — shows which
    * items a pick woke. No-op when the visual is disabled in config. */
-  showWakeColumn(x: number, z: number): void;
+  showWakeColumn(x: number, y: number, z: number): void;
 }
