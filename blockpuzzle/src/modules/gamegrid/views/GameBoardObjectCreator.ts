@@ -1,4 +1,4 @@
-import type { IAssetManager, IInputManager } from "@gamebyte/gamelabsjs";
+import type { IAssetManager, IWorldPointerInput } from "@gamebyte/gamelabsjs";
 import { GridCellObjectOptions, GridItemObjectOptions, GridObjectCreator, type IGridObjectListener } from "@gamebyte/gamelabsjs";
 import type { BlockPuzzleConfig } from "../../../BlockPuzzleConfig";
 import { GameBoardCellObject } from "./GameBoardCellObject";
@@ -31,7 +31,7 @@ export class GameBoardObjectCreator extends GridObjectCreator {
   public override createCellObject(
     options: GridCellObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager?: IAssetManager | null,
   ): GameBoardCellObject {
     const kind = this._config.boardKindFor(options.gridId);
@@ -42,7 +42,7 @@ export class GameBoardObjectCreator extends GridObjectCreator {
   public override createItemObject(
     options: GridItemObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager?: IAssetManager | null,
   ): GameBoardItemObject {
     if (!(options instanceof GameBoardItemObjectOptions)) {

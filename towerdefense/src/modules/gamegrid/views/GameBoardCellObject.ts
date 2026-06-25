@@ -5,7 +5,7 @@ import {
   POINTER_INPUT_LAYER,
   type IAssetManager,
   type IGridObjectListener,
-  type IInputManager,
+  type IWorldPointerInput,
   type IPointerInputHandler,
   type RectGridPreset,
 } from "@gamebyte/gamelabsjs";
@@ -68,7 +68,7 @@ export class GameBoardCellObject extends GridCellObject implements IPointerInput
   public constructor(
     options: GridCellObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager?: IAssetManager | null,
   ) {
     super(options, pointerListener, inputManager, assetManager);

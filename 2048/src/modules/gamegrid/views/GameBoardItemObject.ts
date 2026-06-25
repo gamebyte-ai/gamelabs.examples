@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import gsap from "gsap";
-import type { IAssetManager, IInputManager, RectGridPreset } from "@gamebyte/gamelabsjs";
+import type { IAssetManager, IWorldPointerInput, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridItemObject, type IGridObjectListener } from "@gamebyte/gamelabsjs";
 import { GameBoardItemObjectOptions } from "./GameBoardItemObjectOptions.js";
 
@@ -30,7 +30,7 @@ export class GameBoardItemObject extends GridItemObject {
   private _mesh: THREE.Mesh | null = null;
   private _texture: THREE.CanvasTexture | null = null;
 
-  public constructor(options: GameBoardItemObjectOptions, pointerListener: IGridObjectListener, inputManager: IInputManager | null, assetManager?: IAssetManager | null) {
+  public constructor(options: GameBoardItemObjectOptions, pointerListener: IGridObjectListener, inputManager: IWorldPointerInput | null, assetManager?: IAssetManager | null) {
     super(options, pointerListener, inputManager, assetManager);
   }
 

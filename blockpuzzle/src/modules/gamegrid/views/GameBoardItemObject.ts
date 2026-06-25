@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { IAssetManager, IInputManager, RectGridPreset } from "@gamebyte/gamelabsjs";
+import type { IAssetManager, IWorldPointerInput, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridItemObject, type IGridObjectListener } from "@gamebyte/gamelabsjs";
 import { GameBoardItemObjectOptions } from "./GameBoardItemObjectOptions";
 import { PieceMeshBuilder } from "./PieceMeshBuilder";
@@ -24,7 +24,7 @@ export class GameBoardItemObject extends GridItemObject {
   public constructor(
     options: GameBoardItemObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager: IAssetManager | null,
   ) {
     super(options, pointerListener, inputManager, assetManager);

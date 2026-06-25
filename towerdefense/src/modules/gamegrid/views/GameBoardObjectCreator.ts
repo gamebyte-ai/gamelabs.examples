@@ -5,7 +5,7 @@ import {
   GridObjectCreator,
   type IAssetManager,
   type IGridObjectListener,
-  type IInputManager,
+  type IWorldPointerInput,
 } from "@gamebyte/gamelabsjs";
 import { TowerDefenseConfig } from "../../../TowerDefenseConfig.js";
 import type { ILevelState } from "../../../utilities/ILevelState.js";
@@ -31,7 +31,7 @@ export class GameBoardObjectCreator extends GridObjectCreator {
   public override createCellObject(
     options: GridCellObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager?: IAssetManager | null,
   ): GameBoardCellObject {
     const cell = new GameBoardCellObject(options, pointerListener, inputManager, assetManager);
@@ -42,7 +42,7 @@ export class GameBoardObjectCreator extends GridObjectCreator {
   public override createItemObject(
     options: GridItemObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager?: IAssetManager | null,
   ): GridItemObject {
     if (options instanceof GameBoardItemObjectOptions) {
