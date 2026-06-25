@@ -71,6 +71,9 @@ export class FactoryOperations {
   private _pickCooldown = 0;
   /** Seconds of fan-booster swirl still owed (tornado force on the pile). */
   private _swirl = 0;
+  /** True while the fan has temporarily lowered item↔item friction (fluidising the
+   * pile); restored when the swirl ends. */
+  private _fanFrictionOn = false;
   /** Remaining count per goal (parallel to config.goals), counted down on collect. */
   private _goalRemaining: number[] = [];
   /** Combo multiplier state: `_comboLevel` (≥1, the displayed x-factor) and
@@ -109,6 +112,8 @@ export class FactoryOperations {
     this._pile.clear();
     this._pickLock.clear();
     this._active.clear();
+    this._physics!.setDefaultFriction(this._config!.physics.friction); // clear any leftover fan fluidising
+    this._fanFrictionOn = false;
     this._slots = [];
     this._nextItemId = 1;
     this._model!.reset();
@@ -151,7 +156,17 @@ export class FactoryOperations {
   private _static(width: number, height: number, depth: number, x: number, y: number, z: number): Body3DDef {
     // collisionGroup 2 = "bin": still collides with everything, but the pick ray
     // (mask 1) skips it, so the tall walls don't block clicks on the pile.
-    return { shape: { kind: "box", width, height, depth }, x, y, z, type: "static", friction: 0.6, collisionGroup: 2 };
+    const { wallFriction, wallRestitution } = this._config!.bin;
+    return {
+      shape: { kind: "box", width, height, depth },
+      x,
+      y,
+      z,
+      type: "static",
+      friction: wallFriction,
+      restitution: wallRestitution,
+      collisionGroup: 2,
+    };
   }
 
   private _buildPile(): void {
@@ -284,6 +299,11 @@ export class FactoryOperations {
     if (this._model!.started) return;
     this._model!.setStarted(true);
     this._addLid();
+    if (this._config!.boosters.startCharged) {
+      // TEST: hand the player both boosters fully charged at game start.
+      this._fanCharge = this._config!.boosters.fanMatchCount;
+      this._springCharge = this._config!.boosters.springMatchCount;
+    }
   }
 
   /** Spring booster: take the most recently collected tray item out of the tray
@@ -330,11 +350,18 @@ export class FactoryOperations {
     if (!this._model!.started || this._model!.status !== "playing") return;
     if (this._fanCharge < this._config!.boosters.fanMatchCount) return; // not charged yet
     this._fanCharge = 0; // consume the charge
+    this._triggerSwirl();
+  }
+
+  /** Start the tornado over the WHOLE pile: wake everything through the swirl AND a
+   * settle window after, and drop friction so items slide freely while the spiral
+   * velocity field drives them (see `update`). */
+  private _triggerSwirl(): void {
     const fan = this._config!.fan;
     this._swirl = fan.duration;
-    // The tornado acts on the WHOLE pile: wake everything through the swirl AND a
-    // settle-out window after it.
     this._wakeAll(fan.duration + fan.settleAfter);
+    this._physics!.setDefaultFriction(fan.friction);
+    this._fanFrictionOn = true;
   }
 
   /** Swirl strength multiplier 0→1→0 across the booster's life: smoothstep ramp-in
@@ -558,39 +585,63 @@ export class FactoryOperations {
     if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
     this._decayCombo(dt); // the combo ring drains continuously while playing
 
-    // Forces on the AWAKE bodies only — the gravity correction (drop → after-start)
-    // plus the fan booster's clockwise tornado. Asleep bodies aren't touched, so
-    // they don't get nudged/woken and the pile doesn't jitter on every pick.
+    // Drive the AWAKE bodies. While the fan blows we SET each item's velocity to a
+    // spiral field (reliable tornado regardless of packing); otherwise we apply the
+    // gravity correction (drop → after-start play gravity). Asleep bodies are left
+    // alone, so the pile doesn't jitter on every pick.
     if (this._active.size > 0) {
       const phys = this._config!.physics;
       const fan = this._config!.fan;
-      const dg = phys.gravityAfterStart - phys.gravity; // bodies have mass 1, so force == accel
       const swirling = this._swirl > 0;
-      // Ease the swirl in at the start and out at the end (smoothstep over `ramp`)
-      // so the fan ramps up/down instead of snapping on/off.
-      const intensity = swirling ? this._swirlIntensity() : 0;
-      if (dg !== 0 || swirling) {
+      if (swirling) {
+        // Ease the spiral in/out (smoothstep over `ramp`) so it doesn't snap.
+        const intensity = this._swirlIntensity();
+        const omega = fan.angularSpeed * fan.direction * intensity;
+        const rise = fan.riseSpeed * intensity;
+        // Blend the spiral target with each body's CURRENT velocity instead of
+        // hard-setting it: this keeps a share of the solver's collision-separation
+        // each frame, so packed items can't interpenetrate and then explode apart
+        // when the fan releases. Lower = softer/smoother, higher = crisper spin.
+        const b = fan.velocityBlend;
+        const core = fan.coreRadius;
         for (const id of this._active.keys()) {
-          let fx = 0;
-          let fz = 0;
-          let fy = dg;
-          if (swirling) {
-            const t = this._physics!.getTransform(id, this._t); // radial from the pool centre (0,0)
-            const r = Math.hypot(t.x, t.z) || 1;
-            const spin = fan.strength * intensity;
-            const pull = fan.inward * intensity;
-            // tangential spin (perpendicular to the radius) + inward pull to the centre
-            fx += ((t.z / r) * spin) * fan.direction - (t.x / r) * pull;
-            fz += ((-t.x / r) * spin) * fan.direction - (t.z / r) * pull;
-            // Lift is strongest at the floor and fades to 0 at `height`, so items
-            // are drawn up into a column that tall (not all blasted to the ceiling).
-            const rel = Math.max(0, 1 - (t.y - this._config!.bin.floorY) / fan.height);
-            fy += fan.lift * intensity * rel;
+          const t = this._physics!.getTransform(id, this._t); // position relative to the pool centre (0,0)
+          const rr = Math.hypot(t.x, t.z);
+          const r = rr || 1;
+          // Outward unit (radial); for an item dead-centre, pick a direction so it
+          // still gets ejected instead of sitting on the axis.
+          let ux = t.x / r;
+          let uz = t.z / r;
+          if (rr < 1e-3) {
+            ux = 1;
+            uz = 0;
           }
-          this._physics!.applyForce(id, fx, fy, fz);
+          // Radial drift: push OUT of the central core (carves the vortex hollow,
+          // strongest at the axis, fading to 0 at `coreRadius`), otherwise the
+          // gentle inward gather. Net + = outward, − = inward.
+          const out = rr < core ? fan.outwardSpeed * (1 - rr / core) : 0;
+          const radial = (out - fan.inwardSpeed) * intensity;
+          // Rigid rotation about the y-axis (v = ω × r): same angular rate for every
+          // item so the whole pool turns coherently — plus the radial + upward drift.
+          const tvx = omega * t.z + ux * radial;
+          const tvz = -omega * t.x + uz * radial;
+          const v = this._physics!.getVelocity(id, this._v);
+          this._physics!.setVelocity(id, v.x + (tvx - v.x) * b, v.y + (rise - v.y) * b, v.z + (tvz - v.z) * b);
+        }
+        this._swirl = Math.max(0, this._swirl - dt);
+      } else {
+        // Per-body gravity correction (world gravity is fixed; mass 1 → force == accel).
+        const dg = phys.gravityAfterStart - phys.gravity;
+        if (dg !== 0) {
+          for (const id of this._active.keys()) this._physics!.applyForce(id, 0, dg, 0);
         }
       }
-      if (swirling) this._swirl = Math.max(0, this._swirl - dt);
+    }
+    // The fan made the pile slippery (item↔item friction ~0) so it could fluidise;
+    // restore normal friction once the swirl ends so the pile stacks again.
+    if (this._fanFrictionOn && this._swirl <= 0) {
+      this._physics!.setDefaultFriction(this._config!.physics.friction);
+      this._fanFrictionOn = false;
     }
   }
 

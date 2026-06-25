@@ -41,12 +41,14 @@ export class FactoryMatchConfig {
     halfDepth: 1.6, // play-area half-extent in z (pool depth = halfDepth * 2)
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
-    wallHeight: 22.0, // visible glass-wall height
+    wallHeight: 35.0, // visible glass-wall height
     wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.5,
     wallColor: 0x3b4250,
     transparent: true, // skip the bin's visual mesh (colliders stay) — pile sits on the background
     lidHeight: 6, // a ceiling collider closes the pool this high above the floor once play starts (keeps booster-flung items in)
+    wallFriction: 0.1, // friction of ALL bin colliders (floor + walls + lid) against the items — lower = items slide more
+    wallRestitution: 0, // bounciness [0,1] of those colliders — higher = items bounce off the walls/floor more
   };
 
   /** 3D slot rack in front of the bin where collected shapes fly to and line up.
@@ -149,7 +151,7 @@ export class FactoryMatchConfig {
     // `spinAxis`, so identical models (e.g. guitars) don't all line up the same
     // way. 90° → one of 0/90/180/270. Set spinStepDegrees to 0 to disable. The box
     // colliders are symmetric, so this only changes how the items look.
-    spinAxis: "z" as "x" | "y" | "z",
+    spinAxis: "x" as "x" | "y" | "z",
     spinStepDegrees: 90,
   };
 
@@ -163,7 +165,7 @@ export class FactoryMatchConfig {
     gravity: -10.82,
     gravityAfterStart: -10.82,
     restitution: 0,
-    friction: 0.04,
+    friction: 0.06,
     // The pile is simulated in short per-body bursts, then those bodies sleep, so
     // idle items don't jitter. `settleSeconds` is the wake window after a pick;
     // `initialSettleSeconds` is the longer window after a (re)build so the first
@@ -241,6 +243,7 @@ export class FactoryMatchConfig {
    * centre it on the icon's visible circle (the art's circle sits high in its
    * texture, above the drop shadow — negative = up; tune this to taste). */
   public readonly boosters = {
+    startCharged: false, // TEST: both boosters are fully charged (owned + usable) at game start; set false for normal play
     fanMatchCount: 7, // matches to charge the fan booster
     springMatchCount: 5, // matches to charge the spring booster
     fanColor: 0xc82fff,
@@ -260,24 +263,28 @@ export class FactoryMatchConfig {
    * picks are ignored until this elapses (prevents rapid multi-collect). */
   public readonly pickCooldown = 0.09;
 
-  /** Fan booster: tapping it blows the pile into a clockwise tornado. `duration`
-   * (seconds) is how long it spins; `settleAfter` keeps physics running this many
-   * extra seconds afterwards so the pile resettles before freezing; `strength` the
-   * tangential (swirl) force; `inward` the pull toward the pool centre (keeps the
-   * vortex tight); `lift` the upward force, applied strongest at the floor and
-   * tapering to zero at `height` (so the swirl fills a column that tall instead of
-   * blasting everything to the top); `direction` (+1/-1) flips the spin. `ramp`
-   * (seconds) eases the force in at the start and out at the end so it doesn't
-   * begin/stop abruptly. */
+  /** Fan booster: tapping it spins the WHOLE pool into a tornado. Rather than
+   * pushing with forces (which a packed pile resists), the fan DIRECTLY drives each
+   * item's velocity along a spiral field each frame, so every object — top, bottom,
+   * corners — orbits reliably. The field = rigid rotation about the pool centre at
+   * `angularSpeed` (rad/s; same rate for all → a coherent spiral), plus an inward
+   * drift (`inwardSpeed`, m/s, tightens the column) and an upward drift
+   * (`riseSpeed`, m/s, lifts the tornado). `direction` (+1/-1) flips the spin.
+   * `duration` is how long it spins; `ramp` (s) eases the spiral in/out; friction
+   * drops to `friction` while spinning so items slide freely; `settleAfter` keeps
+   * physics running afterwards so the pile drops back and resettles. */
   public readonly fan = {
     duration: 4,
-    settleAfter: 2.5,
-    strength: 35,
-    inward: 10,
-    lift: 8,
-    height: 25,
-    ramp: 0.6,
-    direction: 1,
+    settleAfter: 2.8,
+    angularSpeed: 7, // tornado spin rate (rad/s) about the pool centre — all items share it, so the whole pool turns together
+    inwardSpeed: 1.5, // m/s drift toward the centre axis OUTSIDE the core (gathers items so they don't hug the walls)
+    coreRadius: 0.7, // radius of the hollow centre — items inside it are pushed OUTWARD (like the dip when you stir a cup), so the middle empties instead of a stuck item sitting on the axis
+    outwardSpeed: 3, // m/s push out of the core (strongest at the axis, fading to 0 at coreRadius)
+    riseSpeed: 0.7, // m/s upward drift while spinning (the tornado lifts items; capped by the lid)
+    direction: -1, // 1 = clockwise (top-down), -1 = counter-clockwise
+    ramp: 0.4, // seconds to ease the spiral in at the start and out at the end
+    friction: 0.1, // item↔item friction while spinning (slippery so they swirl freely); restored after
+    velocityBlend: 0.6, // how hard the spiral overrides physics each frame [0–1]: lower keeps more collision-separation (items don't interpenetrate, so no burst when the fan ends), higher = crisper spin. ~0.3–0.5 is smooth.
   };
 
   /** Spring booster: tapping it flings the last collected item from the tray back
