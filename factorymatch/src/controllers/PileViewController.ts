@@ -28,6 +28,7 @@ export class PileViewController implements IViewController<IPileView> {
   private readonly _subs = new UnsubscribeBag();
   private _updateUnsub: Unsubscribe | null = null;
   private _lastScore = -1;
+  private _lastCash = -1;
   private _lastStatus: GameStatus | null = null;
   private _lastComboLevel = -1;
   private _lastComboFill = -1;
@@ -96,6 +97,10 @@ export class PileViewController implements IViewController<IPileView> {
     if (this._model!.score !== this._lastScore) {
       this._lastScore = this._model!.score;
       this._events!.emitScoreChanged(this._lastScore);
+    }
+    if (this._model!.cash !== this._lastCash) {
+      this._lastCash = this._model!.cash;
+      this._events!.emitCashChanged(this._lastCash);
     }
     if (this._model!.status !== this._lastStatus) {
       this._lastStatus = this._model!.status;

@@ -28,12 +28,12 @@ export class FactoryScreenViewController implements IViewController<IFactoryScre
 
   public initialize(view: IFactoryScreenView): void {
     this._view = view;
-    view.setScore(this._model!.score);
+    view.setCash(this._model!.cash);
     this._applyStatus(this._model!.status);
     this._renderTime(this._timer!.elapsedSeconds);
     this._config!.goals.forEach((goal, i) => view.setGoal(i, goal.target));
 
-    this._subs.add(this._events!.onScoreChanged((n) => view.setScore(n)));
+    this._subs.add(this._events!.onCashChanged((n) => view.setCash(n)));
     this._subs.add(this._events!.onStatusChanged((s) => this._applyStatus(s)));
     this._subs.add(this._timer!.onChange((elapsed) => this._renderTime(elapsed)));
     this._subs.add(this._events!.onGoalChanged((i, remaining) => this._onGoalChanged(i, remaining)));

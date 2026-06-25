@@ -433,9 +433,10 @@ export class FactoryOperations {
       clearedIds = sameIds.slice(-cfg.slots.matchCount);
       const cleared = new Set(clearedIds);
       this._slots = this._slots.filter((s) => !cleared.has(s.id));
-      // Match points scale with the current combo level (x1, x2, …); then this
-      // match feeds the combo ring (which may bump the level for the next match).
+      // Match points + cash both scale with the current combo level (x1, x2, …);
+      // then this match feeds the combo ring (which may bump the level next match).
       this._model!.setScore(this._model!.score + cfg.slots.matchPoints * this._comboLevel);
+      this._model!.setCash(this._model!.cash + cfg.slots.cashPerMatch * this._comboLevel);
       this._addCombo();
       this._chargeBoosters();
     }

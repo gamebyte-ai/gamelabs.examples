@@ -10,11 +10,10 @@ import { FactoryMatchAssetIds, GOAL_ICON_BY_KIND } from "../FactoryMatchAssetIds
 // the viewport so they hold across sizes. Tweak here to nudge the layout.
 const CAPTION_DY = 35; // caption sits this far above its pill centre (row y is config.hud.topY)
 const MULT_Y = 132; // multiplier badge centre y (goal row y is config.hud.goalsY)
-const PILL_H = 46; // on-screen height of the timer + score pills
+const PILL_H = 46; // on-screen height of the cash pill
 const GOAL_H = 88; // on-screen height of each goal chip
 const MULT_H = 62; // on-screen height of the multiplier circle
 const GOAL_GAP = 10; // px between goal chips
-const PILL_GAP = 14; // px between the timer + score pills (they stay centred as a pair)
 const MULT_X = 54; // multiplier badge centre, px in from the game-screen's left edge
 const BOOSTER_GAP_FRACTION = 0.7; // gap between boosters, as a fraction of their height
 const BOOSTER_BOTTOM = 72; // booster row centre, fixed px up from the bottom edge
@@ -26,9 +25,9 @@ const RESULT_ASSET: Record<GameResult, FactoryMatchAssetIds> = {
 };
 
 /**
- * HUD (2D) view — timer + score pills (each with a caption), a multiplier badge,
- * three goal chips and the end-of-game banner. UI art loads through the
- * AssetManager (HudTexture); the 3D pile/rack lives in the World view.
+ * HUD (2D) view — a centred CASH income pill, a multiplier badge, three goal
+ * chips and the end-of-game banner. UI art loads through the AssetManager
+ * (HudTexture); the 3D pile/rack lives in the World view.
  * Non-interactive: pointer events fall through to the World view beneath.
  */
 export class FactoryScreenView extends ScreenView implements IFactoryScreenView {
@@ -40,12 +39,11 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   // separate overlays on the root.
   private readonly _topBar = new PIXI.Container();
   private readonly _bottomBar = new PIXI.Container();
-  private readonly _timer = new PIXI.Container();
-  private readonly _timerValue = this._makeText(22, 0xe8eef6, "800");
-  private readonly _timerCaption = this._makeText(13, 0x9fb0c3, "700");
-  private readonly _score = new PIXI.Container();
-  private readonly _scoreValue = this._makeText(22, 0xe8eef6, "800");
-  private readonly _scoreCaption = this._makeText(13, 0x9fb0c3, "700");
+  // Single centred income display: a pill with a gold coin + "$N", captioned CASH.
+  private readonly _cash = new PIXI.Container();
+  private readonly _cashValue = this._makeText(22, 0xf5d35a, "800");
+  private readonly _cashCaption = this._makeText(13, 0x9fb0c3, "700");
+  private _cashShown = 0; // last cash value drawn, to pulse only on an increase
   private readonly _multiplier = new PIXI.Container();
   private readonly _multiplierValue = this._makeText(20, 0xe8eef6, "800");
   private readonly _comboRing = new PIXI.Graphics();
@@ -68,7 +66,6 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private _goText: PIXI.Text | null = null;
   private _countdownTl: gsap.core.Timeline | null = null;
   private _springPulse: gsap.core.Tween | null = null; // looping "use the spring" prompt
-  private _timeWarnTween: gsap.core.Tween | null = null; // looping last-seconds timer blink
   private _boosterDesignH = 1; // booster icon design height, for rescaling on texture swap
   private _w = 1;
   private _h = 1;
@@ -83,14 +80,14 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
 
     this.addChild(this._topBar, this._bottomBar);
 
-    // Timer + score share the same pill bg, each captioned above.
-    this._buildBadge(this._timer, this._timerValue, FactoryMatchAssetIds.TimerBg, PILL_H);
-    this._buildBadge(this._score, this._scoreValue, FactoryMatchAssetIds.TimerBg, PILL_H);
-    this._timerCaption.text = "TIME";
-    this._scoreCaption.text = "SCORE";
-    this._timerCaption.anchor.set(0.5);
-    this._scoreCaption.anchor.set(0.5);
-    this._topBar.addChild(this._timer, this._score, this._timerCaption, this._scoreCaption);
+    // Single centred CASH income pill: bg + "$N", with a CASH caption above.
+    this._buildBadge(this._cash, this._cashValue, FactoryMatchAssetIds.TimerBg, PILL_H);
+    this._cashValue.anchor.set(0.5); // centred on the pill bg
+    this._cashValue.position.set(0, 0);
+    this._cashValue.style.fill = this._config!.hud.cashColor;
+    this._cashCaption.text = "CASH BALANCE";
+    this._cashCaption.anchor.set(0.5);
+    this._topBar.addChild(this._cash, this._cashCaption);
 
     this._buildBadge(this._multiplier, this._multiplierValue, FactoryMatchAssetIds.MultiplierBg, MULT_H);
     // Combo ring sits over the badge bg but under the value text.
@@ -161,38 +158,34 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._goNode.visible = false;
     this.addChild(this._countNode, this._goNode);
 
-    this.setScore(0);
-    this.setTime("--:--");
+    this.setCash(0);
   }
 
-  public setScore(score: number): void {
-    this._scoreValue.text = String(score);
-  }
-
-  public setTime(text: string): void {
-    this._timerValue.text = text;
-  }
-
-  /** Last-seconds warning: tint the timer red and loop an alpha blink, or restore. */
-  public setTimeWarning(active: boolean): void {
-    const t = this._timerValue;
-    if (active) {
-      if (this._timeWarnTween?.isActive()) return;
-      t.style.fill = this._config!.hud.timerWarnColor;
-      this._timeWarnTween = gsap.to(t, {
-        alpha: 0.2,
-        duration: this._config!.hud.timerBlink,
-        ease: "sine.inOut",
+  /** Cash income, shown as "$N" — at most 2 decimals (trailing zeros dropped, so
+   * 5 → $5, 5.5 → $5.5, 5.256 → $5.26). Pops the pill on an increase. */
+  public setCash(cash: number): void {
+    this._cashValue.text = "$" + Math.round(cash * 100) / 100;
+    if (cash > this._cashShown) {
+      const hud = this._config!.hud;
+      gsap.killTweensOf(this._cash.scale);
+      this._cash.scale.set(1);
+      gsap.to(this._cash.scale, {
+        x: hud.cashPulseScale,
+        y: hud.cashPulseScale,
+        duration: hud.cashPulseDuration,
+        ease: "power2.out",
         yoyo: true,
-        repeat: -1,
+        repeat: 1,
       });
-    } else {
-      this._timeWarnTween?.kill();
-      this._timeWarnTween = null;
-      t.alpha = 1;
-      t.style.fill = 0xe8eef6; // back to the normal HUD text colour
     }
+    this._cashShown = cash;
   }
+
+  // Timer + score are not shown; these stay as no-ops so the timer mechanic can
+  // still run (lose-on-time) without a HUD element.
+  public setScore(_score: number): void {}
+  public setTime(_text: string): void {}
+  public setTimeWarning(_active: boolean): void {}
 
   public setGoal(index: number, count: number): void {
     const value = this._goalValues[index];
@@ -435,12 +428,9 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     const cfg = this._config!;
     const ref = cfg.gameScreen.refWidth;
 
-    // Timer + score: a centred pair near the top, captioned above.
-    const pillHalf = (this._timer.width + PILL_GAP) / 2;
-    this._timer.position.set(-pillHalf, cfg.hud.topY);
-    this._timerCaption.position.set(-pillHalf, cfg.hud.topY - CAPTION_DY);
-    this._score.position.set(pillHalf, cfg.hud.topY);
-    this._scoreCaption.position.set(pillHalf, cfg.hud.topY - CAPTION_DY);
+    // Cash: a single pill centred on x near the top, captioned above.
+    this._cash.position.set(0, cfg.hud.topY);
+    this._cashCaption.position.set(0, cfg.hud.topY - CAPTION_DY);
 
     // Multiplier: pinned to the game screen's left edge.
     this._multiplier.position.set(-ref / 2 + MULT_X, MULT_Y);

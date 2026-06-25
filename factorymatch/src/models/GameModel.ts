@@ -3,12 +3,17 @@ import type { GameStatus, IGameModel, LoseReason } from "./IGameModel.js";
 /** Mutable game state. Only `FactoryOperations` mutates it; the HUD controller reads `IGameModel`. */
 export class GameModel implements IGameModel {
   private _score = 0;
+  private _cash = 0;
   private _status: GameStatus = "playing";
   private _lostReason: LoseReason | null = null;
   private _started = false;
 
   public get score(): number {
     return this._score;
+  }
+
+  public get cash(): number {
+    return this._cash;
   }
 
   public get status(): GameStatus {
@@ -32,6 +37,10 @@ export class GameModel implements IGameModel {
     this._score = value;
   }
 
+  public setCash(value: number): void {
+    this._cash = value;
+  }
+
   public setStatus(status: GameStatus): void {
     this._status = status;
   }
@@ -44,6 +53,7 @@ export class GameModel implements IGameModel {
 
   public reset(): void {
     this._score = 0;
+    this._cash = 0;
     this._status = "playing";
     this._lostReason = null;
     this._started = false;

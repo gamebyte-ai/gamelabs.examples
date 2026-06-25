@@ -9,6 +9,7 @@ import type { GameStatus } from "../models/IGameModel.js";
 export class GameEvents {
   private readonly _scoreChanged = new Set<(score: number) => void>();
   private readonly _statusChanged = new Set<(status: GameStatus) => void>();
+  private readonly _cashChanged = new Set<(cash: number) => void>();
   private readonly _goalChanged = new Set<(index: number, remaining: number) => void>();
   private readonly _comboChanged = new Set<(level: number, fill: number) => void>();
   private readonly _boosterChanged = new Set<(fanFill: number, springFill: number) => void>();
@@ -23,6 +24,15 @@ export class GameEvents {
   }
   public emitScoreChanged(score: number): void {
     for (const cb of this._scoreChanged) cb(score);
+  }
+
+  /** Fired when the player's cash changes (earned on matches). */
+  public onCashChanged(cb: (cash: number) => void): Unsubscribe {
+    this._cashChanged.add(cb);
+    return () => this._cashChanged.delete(cb);
+  }
+  public emitCashChanged(cash: number): void {
+    for (const cb of this._cashChanged) cb(cash);
   }
 
   public onStatusChanged(cb: (status: GameStatus) => void): Unsubscribe {

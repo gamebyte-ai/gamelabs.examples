@@ -6,9 +6,12 @@ export type GameResult = "allClear" | "timeUp" | "gameOver";
 /** HUD view — UI only: score, countdown timer, goal chips and the end-of-game
  * banner. The 3D pile + slot rack live in the World view. */
 export interface IFactoryScreenView extends IScreenView {
+  /** Set the player's cash (the single top income display, shown as $N). */
+  setCash(cash: number): void;
+  // Timer + score are no longer shown; these are kept as no-ops so the timer
+  // mechanic (lose-on-time) can still drive without a HUD element.
   setScore(score: number): void;
   setTime(text: string): void;
-  /** Turn the timer red + blink it (last seconds) or restore it. */
   setTimeWarning(active: boolean): void;
   setGoal(index: number, count: number): void;
   pulseGoal(index: number): void;

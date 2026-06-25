@@ -11,6 +11,7 @@ export type LoseReason = "time" | "tray";
 /** Readonly view of game state for the HUD controller. */
 export interface IGameModel {
   readonly score: number;
+  readonly cash: number;
   readonly status: GameStatus;
   readonly lostReason: LoseReason | null;
   /** False during the start-of-game countdown; true once play begins. */

@@ -47,7 +47,7 @@ export class FactoryMatchConfig {
     wallColor: 0x3b4250,
     transparent: true, // skip the bin's visual mesh (colliders stay) — pile sits on the background
     lidHeight: 6, // a ceiling collider closes the pool this high above the floor once play starts (keeps booster-flung items in)
-    wallFriction: 0.1, // friction of ALL bin colliders (floor + walls + lid) against the items — lower = items slide more
+    wallFriction: 0.15, // friction of ALL bin colliders (floor + walls + lid) against the items — lower = items slide more
     wallRestitution: 0, // bounciness [0,1] of those colliders — higher = items bounce off the walls/floor more
   };
 
@@ -162,8 +162,8 @@ export class FactoryMatchConfig {
    * correction force, since the world gravity is fixed at creation);
    * `restitution` is the bounce [0,1]; `friction` resists sliding. */
   public readonly physics = {
-    gravity: -10.82,
-    gravityAfterStart: -10.82,
+    gravity: -8.82,
+    gravityAfterStart: -6.82,
     restitution: 0,
     friction: 0.06,
     // The pile is simulated in short per-body bursts, then those bodies sleep, so
@@ -191,7 +191,7 @@ export class FactoryMatchConfig {
     radius: 0.33,
     height: 7,
     max: 0,
-    show: true,
+    show: false,
     color: 0x49d1ff,
     opacity: 0.28,
     fadeSeconds: 0.4,
@@ -212,7 +212,8 @@ export class FactoryMatchConfig {
   /** Slot tray: collect identical shapes; matchCount of a kind clears + scores.
    * `collectPoints` is scored per pick (every item taken into the tray);
    * `matchPoints` is scored on each 3-of-a-kind clear. */
-  public readonly slots = { capacity: 7, matchCount: 3, collectPoints: 10, matchPoints: 30 };
+  public readonly slots = { capacity: 7, matchCount: 3, collectPoints: 10, matchPoints: 30, cashPerMatch: 0.37 };
+  // cashPerMatch: $ earned on each 3-of-a-kind match (× the current combo multiplier).
 
   /** Combo multiplier ring around the multiplier badge. Each match adds `step` to
    * the ring's fill (fraction of a full lap); the fill drains continuously at
@@ -243,7 +244,7 @@ export class FactoryMatchConfig {
    * centre it on the icon's visible circle (the art's circle sits high in its
    * texture, above the drop shadow — negative = up; tune this to taste). */
   public readonly boosters = {
-    startCharged: false, // TEST: both boosters are fully charged (owned + usable) at game start; set false for normal play
+    startCharged: false, // when true, both boosters are fully charged (owned + usable) at game start (test/debug); false = charge via matches
     fanMatchCount: 7, // matches to charge the fan booster
     springMatchCount: 5, // matches to charge the spring booster
     fanColor: 0xc82fff,
@@ -342,6 +343,9 @@ export class FactoryMatchConfig {
     goalDoneBgTint: 0x5e6b7a, // a completed goal's bg + item icon are tinted to this muted colour (full opacity)
     boosterScale: 0.18, // bottom booster icon height as a fraction of the game-screen width (scales with screen size)
     bannerScale: 0.82, // end-of-game banner width as a fraction of the game-screen width (scales with screen size)
+    cashColor: 0x15eb4e, // colour of the CASH "$N" text
+    cashPulseScale: 1.25, // peak scale of the cash pill's pop on each increase
+    cashPulseDuration: 0.12, // half-duration of that pop (up, then back) in seconds
     timerWarnSeconds: 10, // the timer turns red + blinks once this many seconds remain
     timerWarnColor: 0xff5b5b, // timer text colour while in the warning window
     timerBlink: 0.3, // half-period of the timer warning blink (seconds)
