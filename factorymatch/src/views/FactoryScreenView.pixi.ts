@@ -55,6 +55,12 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
   private readonly _boosterSpring = new PIXI.Sprite();
   private readonly _fanRing = new PIXI.Graphics();
   private readonly _springRing = new PIXI.Graphics();
+  // Animated charge fill per booster: `shown` is the value currently drawn; a tween
+  // eases it toward each new target so the ring fills smoothly instead of snapping.
+  // `full` tracks whether it's charged (to pop once on the <1→full transition);
+  // `pop` is the one-shot ready scale animation.
+  private readonly _fanFill = { shown: 0, full: false, tween: null as gsap.core.Tween | null, pop: null as gsap.core.Timeline | null };
+  private readonly _springFill = { shown: 0, full: false, tween: null as gsap.core.Tween | null, pop: null as gsap.core.Timeline | null };
   private readonly _fanListeners = new Set<() => void>();
   private readonly _springListeners = new Set<() => void>();
 
@@ -231,29 +237,76 @@ export class FactoryScreenView extends ScreenView implements IFactoryScreenView 
     this._drawRing(this._comboRing, c.ringRadius, c.ringWidth, fill, color, c.trackColor, c.trackAlpha, c.startAngle);
   }
 
-  /** Draw both booster charge rings and swap each icon to its active art once its
-   * ring is full (passive while still charging). */
+  /** Animate both booster charge rings toward their new fill and swap each icon to
+   * its active art once its ring finishes filling (passive while charging/draining). */
   public setBoosterCharge(fanFill: number, springFill: number): void {
     const b = this._config!.boosters;
     if (springFill < 1) this._stopSpringPulse(); // spring spent (or drained) — end the prompt loop
-    const draw = (
-      g: PIXI.Graphics,
-      icon: PIXI.Sprite,
-      fill: number,
-      color: number,
-      passiveId: FactoryMatchAssetIds,
-      activeId: FactoryMatchAssetIds,
-    ): void => {
-      const charged = fill >= 1;
-      this._applyBoosterTexture(icon, charged ? activeId : passiveId);
-      // The active art sits lower in its frame than the passive — nudge only it.
-      icon.y = -BOOSTER_BOTTOM + (charged ? b.activeIconOffsetY : 0);
-      const radius = this._boosterDesignH * b.ringRadiusScale; // independent of the padded texture
-      this._drawRing(g, radius, b.ringWidth, fill, color, b.trackColor, b.trackAlpha, b.startAngle);
-    };
     const ids = FactoryMatchAssetIds;
-    draw(this._fanRing, this._boosterFan, fanFill, b.fanColor, ids.BoosterFan, ids.BoosterFanActive);
-    draw(this._springRing, this._boosterSpring, springFill, b.springColor, ids.BoosterSpring, ids.BoosterSpringActive);
+    this._animateBoosterRing(this._fanFill, this._fanRing, this._boosterFan, fanFill, b.fanColor, ids.BoosterFan, ids.BoosterFanActive);
+    this._animateBoosterRing(this._springFill, this._springRing, this._boosterSpring, springFill, b.springColor, ids.BoosterSpring, ids.BoosterSpringActive);
+  }
+
+  /** Tween a booster ring's drawn fill toward `target`, redrawing each frame. The
+   * icon drops to passive immediately when not charged, and lights its active art
+   * once the fill animation reaches full. */
+  private _animateBoosterRing(
+    slot: { shown: number; full: boolean; tween: gsap.core.Tween | null; pop: gsap.core.Timeline | null },
+    g: PIXI.Graphics,
+    icon: PIXI.Sprite,
+    target: number,
+    color: number,
+    passiveId: FactoryMatchAssetIds,
+    activeId: FactoryMatchAssetIds,
+  ): void {
+    const b = this._config!.boosters;
+    const radius = this._boosterDesignH * b.ringRadiusScale; // independent of the padded texture
+    const draw = (f: number): void =>
+      this._drawRing(g, radius, b.ringWidth, f, color, b.trackColor, b.trackAlpha, b.startAngle);
+    if (target < 1) {
+      this._applyBoosterTexture(icon, passiveId); // not charged → passive now
+      icon.y = -BOOSTER_BOTTOM;
+    }
+    const becameFull = target >= 1 && !slot.full; // crossing into charged → pop once
+    slot.full = target >= 1;
+    slot.tween?.kill();
+    draw(slot.shown);
+    slot.tween = gsap.to(slot, {
+      shown: target,
+      duration: b.fillDuration,
+      ease: "power2.out",
+      onUpdate: () => draw(slot.shown),
+      onComplete: () => {
+        if (target >= 1) {
+          this._applyBoosterTexture(icon, activeId); // ring full → light the active art
+          icon.y = -BOOSTER_BOTTOM + b.activeIconOffsetY;
+        }
+        if (becameFull) this._popBoosterReady(slot, icon, g); // one-shot "charged!" pop
+      },
+    });
+  }
+
+  /** One-shot "charged" pop: grow the icon + ring together (fast→slow), then shrink
+   * back the same way. Driven off a single factor so both scale from their own rest. */
+  private _popBoosterReady(
+    slot: { pop: gsap.core.Timeline | null },
+    icon: PIXI.Sprite,
+    ring: PIXI.Graphics,
+  ): void {
+    const b = this._config!.boosters;
+    const iconRest = this._boosterDesignH / icon.texture.height;
+    slot.pop?.kill();
+    gsap.killTweensOf(icon.scale);
+    gsap.killTweensOf(ring.scale);
+    const s = { v: 1 };
+    const apply = (): void => {
+      icon.scale.set(iconRest * s.v);
+      ring.scale.set(s.v);
+    };
+    slot.pop = gsap
+      .timeline({ onUpdate: apply, onComplete: apply })
+      .to(s, { v: b.readyPopScale, duration: b.readyPopDuration, ease: "power2.out" }) // grow fast→slow
+      .to(s, { v: 1, duration: b.readyPopDuration, ease: "power2.out" }); // shrink fast→slow
   }
 
   /** Swap a booster icon's texture (no-op if unchanged), rescaling to its design

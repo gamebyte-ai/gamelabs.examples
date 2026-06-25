@@ -144,7 +144,7 @@ export class FactoryOperations {
     const edgeX = bin.halfWidth + t / 2;
     const edgeZ = bin.halfDepth + t / 2;
 
-    this._binIds.push(this._physics!.createBody(this._static(spanX, 0.2, spanZ, 0, bin.floorY - 0.1, 0)));
+    this._binIds.push(this._physics!.createBody(this._static(spanX, 0.2, spanZ, 0, bin.floorY - 0.1, 0, bin.floorFriction)));
     for (const sx of [-1, 1]) {
       this._binIds.push(this._physics!.createBody(this._static(t, ch, spanZ, sx * edgeX, wy, 0)));
     }
@@ -153,18 +153,25 @@ export class FactoryOperations {
     }
   }
 
-  private _static(width: number, height: number, depth: number, x: number, y: number, z: number): Body3DDef {
+  private _static(
+    width: number,
+    height: number,
+    depth: number,
+    x: number,
+    y: number,
+    z: number,
+    friction: number = this._config!.bin.wallFriction,
+  ): Body3DDef {
     // collisionGroup 2 = "bin": still collides with everything, but the pick ray
     // (mask 1) skips it, so the tall walls don't block clicks on the pile.
-    const { wallFriction, wallRestitution } = this._config!.bin;
     return {
       shape: { kind: "box", width, height, depth },
       x,
       y,
       z,
       type: "static",
-      friction: wallFriction,
-      restitution: wallRestitution,
+      friction, // walls/lid default to bin.wallFriction; the floor passes its own
+      restitution: this._config!.bin.wallRestitution,
       collisionGroup: 2,
     };
   }
@@ -259,10 +266,19 @@ export class FactoryOperations {
     for (const id of this._pile.keys()) this._wakeBody(id, seconds);
   }
 
-  /** Put every pile body to sleep so the solver skips it — a frozen pile can't
-   * jitter, and a later pick wakes only the bodies near it. */
+  /** Freeze a body: zero its (linear + angular) velocity, THEN sleep it. Zeroing
+   * first matters because cannon stores velocity through sleep — without this a
+   * body resumes its stale velocity the moment it's woken again. */
+  private _freeze(id: BodyId): void {
+    this._physics!.setVelocity(id, 0, 0, 0); // also wakes it…
+    this._physics!.setAngularVelocity(id, 0, 0, 0);
+    this._physics!.sleep(id); // …then re-sleep, now at rest
+  }
+
+  /** Put every pile body to sleep (at rest) so the solver skips it — a frozen pile
+   * can't jitter, and a later pick wakes only the bodies near it. */
   private _sleepAll(): void {
-    for (const id of this._pile.keys()) this._physics!.sleep(id);
+    for (const id of this._pile.keys()) this._freeze(id);
   }
 
   /** Wake the pile bodies a vertical cylinder touches — radius `pickWake.radius`
@@ -544,7 +560,7 @@ export class FactoryOperations {
         this._active.set(id, next);
       } else {
         this._active.delete(id);
-        if (this._pile.has(id)) this._physics!.sleep(id);
+        if (this._pile.has(id)) this._freeze(id); // zero velocity, then sleep
       }
     }
     if (hadActive && this._active.size === 0) this._sleepAll();
@@ -554,7 +570,7 @@ export class FactoryOperations {
     // to sleep; collision-woken strays freeze before they can move or propagate.
     if (this._active.size > 0) {
       for (const id of this._pile.keys()) {
-        if (!this._active.has(id)) this._physics!.sleep(id);
+        if (!this._active.has(id)) this._freeze(id);
       }
     }
     // Speed cap: rein in any awake body the step over-accelerated (squeeze/collision
@@ -605,14 +621,24 @@ export class FactoryOperations {
         // when the fan releases. Lower = softer/smoother, higher = crisper spin.
         const b = fan.velocityBlend;
         const core = fan.coreRadius;
+        // The swirl AXIS travels in a circle inside the pool so the tornado sweeps
+        // toward each wall in turn (items get pushed against the walls and churn =
+        // mixing). It eases out from / back to the pool centre with the ramp, so it
+        // starts and ends centred.
+        const elapsed = this._config!.fan.duration - this._swirl;
+        const ca = elapsed * fan.centerOrbitSpeed;
+        const cx = Math.cos(ca) * fan.centerOrbitRadius * intensity;
+        const cz = Math.sin(ca) * fan.centerOrbitRadius * intensity;
         for (const id of this._active.keys()) {
-          const t = this._physics!.getTransform(id, this._t); // position relative to the pool centre (0,0)
-          const rr = Math.hypot(t.x, t.z);
+          const t = this._physics!.getTransform(id, this._t);
+          const dx = t.x - cx; // position relative to the moving swirl axis
+          const dz = t.z - cz;
+          const rr = Math.hypot(dx, dz);
           const r = rr || 1;
-          // Outward unit (radial); for an item dead-centre, pick a direction so it
-          // still gets ejected instead of sitting on the axis.
-          let ux = t.x / r;
-          let uz = t.z / r;
+          // Outward unit (radial); for an item on the axis, pick a direction so it
+          // still gets ejected instead of sitting there.
+          let ux = dx / r;
+          let uz = dz / r;
           if (rr < 1e-3) {
             ux = 1;
             uz = 0;
@@ -622,10 +648,9 @@ export class FactoryOperations {
           // gentle inward gather. Net + = outward, − = inward.
           const out = rr < core ? fan.outwardSpeed * (1 - rr / core) : 0;
           const radial = (out - fan.inwardSpeed) * intensity;
-          // Rigid rotation about the y-axis (v = ω × r): same angular rate for every
-          // item so the whole pool turns coherently — plus the radial + upward drift.
-          const tvx = omega * t.z + ux * radial;
-          const tvz = -omega * t.x + uz * radial;
+          // Rigid rotation about the moving axis (v = ω × r) + radial + upward drift.
+          const tvx = omega * dz + ux * radial;
+          const tvz = -omega * dx + uz * radial;
           const v = this._physics!.getVelocity(id, this._v);
           this._physics!.setVelocity(id, v.x + (tvx - v.x) * b, v.y + (rise - v.y) * b, v.z + (tvz - v.z) * b);
         }

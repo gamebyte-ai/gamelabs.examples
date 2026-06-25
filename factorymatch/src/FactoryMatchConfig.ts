@@ -42,13 +42,14 @@ export class FactoryMatchConfig {
     floorY: 0, // top surface of the floor
     floorColor: 0x2b313b,
     wallHeight: 35.0, // visible glass-wall height
-    wallColliderHeight: 19.0, // collider extends higher than the glass so shapes can't bounce out
+    wallColliderHeight: 22.0, // collider extends higher than the glass so shapes can't bounce out
     wallThickness: 0.5,
     wallColor: 0x3b4250,
     transparent: true, // skip the bin's visual mesh (colliders stay) — pile sits on the background
     lidHeight: 6, // a ceiling collider closes the pool this high above the floor once play starts (keeps booster-flung items in)
-    wallFriction: 0.15, // friction of ALL bin colliders (floor + walls + lid) against the items — lower = items slide more
-    wallRestitution: 0, // bounciness [0,1] of those colliders — higher = items bounce off the walls/floor more
+    wallFriction: 0.02, // friction of the side walls + lid vs items — keep LOW so items grazing a wall slide down cleanly instead of stick-slip jittering against it
+    floorFriction: 0.3, // friction of the floor vs items (separate from walls) — keep moderate so the pile settles + doesn't slide around on the floor
+    wallRestitution: 0, // bounciness [0,1] of the bin colliders — higher = items bounce off the walls/floor more
   };
 
   /** 3D slot rack in front of the bin where collected shapes fly to and line up.
@@ -99,7 +100,7 @@ export class FactoryMatchConfig {
    * 0 is a sharp triangle, 1 a uniform ribbon. `color`/`opacity` its look. After
    * the item lands, the tail catches up to the head over `fade` seconds, so it
    * vanishes from its origin toward the item (not a whole-strip fade). */
-  public readonly trail = { enabled: true, color: 0xffffff, width: 0.1, tipWidth: 0, points: 6, opacity: 0.8, fade: 0.1 };
+  public readonly trail = { enabled: true, color: 0xffffff, width: 0.11, tipWidth: 0, points: 10, opacity: 0.8, fade: 0.15 };
 
   public readonly kinds: Record<Kind, KindDef> = {
     dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
@@ -144,7 +145,7 @@ export class FactoryMatchConfig {
    * a handful of layers regardless of item count. */
   public readonly spawn = {
     cell: 0.4,
-    layerGap: 0.3,
+    layerGap: 0.8, // vertical gap between stacked spawn layers — keep ≥ item size (~0.5) so layers don't spawn overlapping (overlap = instant squeeze → jitter); bigger = items arrive more staggered, less pile-up load
     baseY: 3.5,
     jitter: 0.5,
     // Each item spawns rotated by a RANDOM multiple of `spinStepDegrees` about the
@@ -162,9 +163,9 @@ export class FactoryMatchConfig {
    * correction force, since the world gravity is fixed at creation);
    * `restitution` is the bounce [0,1]; `friction` resists sliding. */
   public readonly physics = {
-    gravity: -8.82,
-    gravityAfterStart: -6.82,
-    restitution: 0,
+    gravity: -9.82,
+    gravityAfterStart: -4.82,
+    restitution: 0.01,
     friction: 0.06,
     // The pile is simulated in short per-body bursts, then those bodies sleep, so
     // idle items don't jitter. `settleSeconds` is the wake window after a pick;
@@ -256,6 +257,9 @@ export class FactoryMatchConfig {
     startAngle: -90, // 12 o'clock; fills clockwise
     trackColor: 0x1c2430,
     trackAlpha: 0.55,
+    fillDuration: 0.2, // seconds the ring takes to animate to each new charge level (instead of snapping)
+    readyPopScale: 1.2, // when a booster becomes fully charged, the icon + ring pop to this × size (one-shot)
+    readyPopDuration: 0.5, // per-phase duration of that pop (grow, then shrink) in seconds — both ease-out (fast→slow)
     promptPulseScale: 1.3, // spring icon pops to this × its size when a full tray is rescued (use-me prompt)
     promptPulseDuration: 0.76, // half-duration of that pop (up, then back) in seconds
   };
@@ -277,15 +281,22 @@ export class FactoryMatchConfig {
   public readonly fan = {
     duration: 4,
     settleAfter: 2.8,
-    angularSpeed: 7, // tornado spin rate (rad/s) about the pool centre — all items share it, so the whole pool turns together
-    inwardSpeed: 1.5, // m/s drift toward the centre axis OUTSIDE the core (gathers items so they don't hug the walls)
-    coreRadius: 0.7, // radius of the hollow centre — items inside it are pushed OUTWARD (like the dip when you stir a cup), so the middle empties instead of a stuck item sitting on the axis
-    outwardSpeed: 3, // m/s push out of the core (strongest at the axis, fading to 0 at coreRadius)
-    riseSpeed: 0.7, // m/s upward drift while spinning (the tornado lifts items; capped by the lid)
+    angularSpeed: 5.5, // tornado spin rate (rad/s) about the pool centre — all items share it, so the whole pool turns together
+    inwardSpeed: 0.1, // m/s drift toward the centre axis OUTSIDE the core (gathers items so they don't hug the walls)
+    coreRadius: 0.8, // radius of the hollow centre — items inside it are pushed OUTWARD (like the dip when you stir a cup), so the middle empties instead of a stuck item sitting on the axis
+    outwardSpeed: 4, // m/s push out of the core (strongest at the axis, fading to 0 at coreRadius)
+    riseSpeed: 0.8, // m/s upward drift while spinning (the tornado lifts items; capped by the lid)
     direction: -1, // 1 = clockwise (top-down), -1 = counter-clockwise
     ramp: 0.4, // seconds to ease the spiral in at the start and out at the end
     friction: 0.1, // item↔item friction while spinning (slippery so they swirl freely); restored after
-    velocityBlend: 0.6, // how hard the spiral overrides physics each frame [0–1]: lower keeps more collision-separation (items don't interpenetrate, so no burst when the fan ends), higher = crisper spin. ~0.3–0.5 is smooth.
+    velocityBlend: 0.7, // how hard the spiral overrides physics each frame [0–1]: lower keeps more collision-separation (items don't interpenetrate, so no burst when the fan ends), higher = crisper spin. ~0.3–0.5 is smooth.
+    // The swirl AXIS itself travels in a circle inside the pool (instead of staying
+    // centred), so the tornado sweeps toward each wall in turn — items get pushed
+    // against the walls and churn = mixing. `centerOrbitRadius` is how far the axis
+    // moves from the pool centre (toward the walls); `centerOrbitSpeed` is how fast
+    // the axis travels (rad/s). The axis eases out to/from the centre with the ramp.
+    centerOrbitRadius: 0.1,
+    centerOrbitSpeed: 0.2,
   };
 
   /** Spring booster: tapping it flings the last collected item from the tray back
