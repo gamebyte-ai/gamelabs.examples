@@ -76,22 +76,15 @@ export class FactoryMatchApp extends GamelabsApp {
       const url = new URL(`../assets/ui/${fileName}`, import.meta.url).href;
       this._assetRequestList.addRequest(new AssetRequest(AssetTypes.HudTexture, id, url));
     };
-    add(FactoryMatchAssetIds.TimerBg, "UI_Timer_BG_01.png");
-    add(FactoryMatchAssetIds.GoalBg, "UI_Goal_BG_01.png");
-    add(FactoryMatchAssetIds.MultiplierBg, "UI_Multiplier_BG_Circle_01.png");
-    add(FactoryMatchAssetIds.ResultAllClear, "FBT_TM3D_AllClear.png");
-    add(FactoryMatchAssetIds.ResultTimeIsUp, "FBT_TM3D_TimeIsUp.png");
-    add(FactoryMatchAssetIds.ResultGameOver, "FBT_TM3D_GameOver.png");
-    add(FactoryMatchAssetIds.GoalIconDice, "Toy_Dice_Purple.png");
-    add(FactoryMatchAssetIds.GoalIconRadio, "Radio_Turqoise.png");
-    add(FactoryMatchAssetIds.GoalIconBillard, "BillardBall_8.png");
-    add(FactoryMatchAssetIds.BoosterFan, "UI_Booster_Fan_Passive_01.png");
-    add(FactoryMatchAssetIds.BoosterFanActive, "UI_Booster_Fan_Active_01.png");
-    add(FactoryMatchAssetIds.BoosterSpring, "UI_Booster_Spring_Passive_01.png");
-    add(FactoryMatchAssetIds.BoosterSpringActive, "UI_Booster_Spring_Active_01.png");
-    add(FactoryMatchAssetIds.CountdownNum1, "SM_Number_1_LettersNumbers_Purple.png");
-    add(FactoryMatchAssetIds.CountdownNum2, "SM_Number_2_LettersNumbers_Purple.png");
-    add(FactoryMatchAssetIds.CountdownNum3, "SM_Number_3_LettersNumbers_Purple.png");
+    // Placeholder UI shapes (white SVGs, tinted in the screen view).
+    add(FactoryMatchAssetIds.UiPill, "UI_Pill.svg");
+    add(FactoryMatchAssetIds.UiCircle, "UI_Circle.svg");
+    add(FactoryMatchAssetIds.UiPanel, "UI_Panel.svg");
+    add(FactoryMatchAssetIds.ShapeCube, "Shape_Cube.svg");
+    add(FactoryMatchAssetIds.ShapeSphere, "Shape_Sphere.svg");
+    add(FactoryMatchAssetIds.ShapeCylinder, "Shape_Cylinder.svg");
+    add(FactoryMatchAssetIds.ShapeCuboid, "Shape_Cuboid.svg");
+    add(FactoryMatchAssetIds.ShapePyramid, "Shape_Pyramid.svg");
     this.assetManager.loadAll(this._assetRequestList.getRequests());
   }
 

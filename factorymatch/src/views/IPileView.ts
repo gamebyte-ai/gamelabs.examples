@@ -1,7 +1,7 @@
 import type { IView, Unsubscribe } from "@gamebyte/gamelabsjs";
 import type { Physics3DEntityView } from "@gamebyte/gamelabsjs/physics3d";
 import type { CollectResult } from "../utilities/FactoryOperations.js";
-import type { Kind } from "../models/IGameModel.js";
+import type { Kind } from "../constants/Kind.js";
 
 /**
  * The World (3D) view: renders the bin + pile shapes, reports which pile body the

@@ -1,5 +1,5 @@
 import type { Unsubscribe } from "@gamebyte/gamelabsjs";
-import type { GameStatus } from "../models/IGameModel.js";
+import type { GameStatus } from "../constants/GameStatus.js";
 
 /**
  * Cross-controller bus: the pile (World) controller emits HUD-relevant changes;

@@ -8,7 +8,8 @@ import {
 
 import type { IPileView } from "../views/IPileView.js";
 import { IGameModel } from "../models/IGameModel.js";
-import type { IGameModel as IGameModelType, GameStatus } from "../models/IGameModel.js";
+import type { IGameModel as IGameModelType } from "../models/IGameModel.js";
+import type { GameStatus } from "../constants/GameStatus.js";
 import { GameEvents } from "../events/GameEvents.js";
 import { FactoryOperations } from "../utilities/FactoryOperations.js";
 

@@ -1,4 +1,5 @@
-import type { GameStatus, IGameModel, LoseReason } from "./IGameModel.js";
+import type { IGameModel } from "./IGameModel.js";
+import type { GameStatus, LoseReason } from "../constants/GameStatus.js";
 
 /** Mutable game state. Only `FactoryOperations` mutates it; the HUD controller reads `IGameModel`. */
 export class GameModel implements IGameModel {

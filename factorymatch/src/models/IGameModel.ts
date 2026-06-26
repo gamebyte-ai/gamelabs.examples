@@ -1,12 +1,6 @@
 import { InjectionToken } from "@gamebyte/gamelabsjs";
 
-/** Matchable object kinds — one per imported 3D model. */
-export type Kind = "dice" | "billardball" | "guitar" | "radio" | "gascan";
-
-export type GameStatus = "playing" | "won" | "lost";
-
-/** Why the game was lost (drives which end banner shows). Null while not lost. */
-export type LoseReason = "time" | "tray";
+import type { GameStatus, LoseReason } from "../constants/GameStatus.js";
 
 /** Readonly view of game state for the HUD controller. */
 export interface IGameModel {

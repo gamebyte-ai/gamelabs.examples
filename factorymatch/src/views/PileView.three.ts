@@ -7,7 +7,7 @@ import { FactoryMatchConfig } from "../FactoryMatchConfig.js";
 import { ModelLibraryService } from "../services/ModelLibraryService.js";
 import { TrailRibbon } from "./TrailRibbon.three.js";
 import type { CollectResult } from "../utilities/FactoryOperations.js";
-import type { Kind } from "../models/IGameModel.js";
+import type { Kind } from "../constants/Kind.js";
 
 const PICK_RANGE = 40;
 const OUTLINE_MASK_ORDER = 998; // stencil mask of the hovered shape's silhouette…

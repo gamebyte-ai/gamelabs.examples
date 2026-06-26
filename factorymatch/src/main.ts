@@ -10,8 +10,10 @@ async function start(): Promise<void> {
   if (!stage) throw new Error("Missing #stage element");
 
   const config = new FactoryMatchConfig();
-  // Load the 3D models up front so the pile can spawn them synchronously. A
-  // failed load rejects here and is surfaced by start().catch — no partial run.
+  // Prepare the per-kind shapes up front so the pile can spawn them synchronously.
+  // ModelLibraryService is the asset-integration seam: it builds placeholder
+  // primitives today; integrating real models is a swap inside that class (a failed
+  // load would reject here and surface via start().catch — no partial run).
   const models = new ModelLibraryService(config);
   await models.load();
 

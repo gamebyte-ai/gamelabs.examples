@@ -1,7 +1,6 @@
 import type { IScreenView, Unsubscribe } from "@gamebyte/gamelabsjs";
 
-/** End-of-game banner to show. */
-export type GameResult = "allClear" | "timeUp" | "gameOver";
+import type { GameResult } from "../constants/GameResult.js";
 
 /** HUD view — UI only: score, countdown timer, goal chips and the end-of-game
  * banner. The 3D pile + slot rack live in the World view. */

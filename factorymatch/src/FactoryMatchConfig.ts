@@ -1,5 +1,5 @@
 import { SCREEN_TRANSITION_TYPES, type ScreenTransition, type ViewportConfig } from "@gamebyte/gamelabsjs";
-import type { Kind } from "./models/IGameModel.js";
+import type { Kind } from "./constants/Kind.js";
 
 /** Per-kind (box) collider full-extents + a tint colour applied to kinds that
  * have no albedo texture yet (textured kinds ignore it). Colliders are box
@@ -103,11 +103,11 @@ export class FactoryMatchConfig {
   public readonly trail = { enabled: true, color: 0xffffff, width: 0.11, tipWidth: 0, points: 10, opacity: 0.8, fade: 0.15 };
 
   public readonly kinds: Record<Kind, KindDef> = {
-    dice: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
-    billardball: { color: 0x1a1a1a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
-    guitar: { color: 0xebc26a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
-    radio: { color: 0x2bb1a8, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
-    gascan: { color: 0xd23b2e, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    cube: { color: 0xf5f5f5, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    sphere: { color: 0x4a90e2, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    cylinder: { color: 0xebc26a, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    cuboid: { color: 0x2bb1a8, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
+    pyramid: { color: 0xd23b2e, collider: { width: 0.5, height: 0.5, depth: 0.5 } },
   };
 
   /** Per-kind display tuning. `size` = largest world-space extent each model is
@@ -118,24 +118,24 @@ export class FactoryMatchConfig {
     size: Record<Kind, number>;
     rotation: Record<Kind, { x: number; y: number; z: number }>;
   } = {
-    size: { dice: 0.3, billardball: 0.35, guitar: 0.9, radio: 0.5, gascan: 0.5 },
+    size: { cube: 0.3, sphere: 0.35, cylinder: 0.9, cuboid: 0.5, pyramid: 0.5 },
     rotation: {
-      dice: { x: 0, y: 0, z: 0 },
-      billardball: { x: 0, y: 0, z: 0 },
-      guitar: { x: -90, y: 0, z: 180 },
-      radio: { x: 90, y: 180, z: 0 },
-      gascan: { x: 90  , y:  180, z: 20 },
+      cube: { x: 0, y: 0, z: 0 },
+      sphere: { x: 0, y: 0, z: 0 },
+      cylinder: { x: -90, y: 0, z: 180 },
+      cuboid: { x: 90, y: 180, z: 0 },
+      pyramid: { x: 90, y: 180, z: 20 },
     },
   };
 
   /** How many of each kind to drop into the bin, per kind (keep each a multiple of
    * matchCount → fully clearable). */
   public readonly spawnPerKind: Record<Kind, number> = {
-    dice: 54,
-    billardball: 54,
-    guitar: 69,
-    radio: 54,
-    gascan: 75,
+    cube: 54,
+    sphere: 54,
+    cylinder: 69,
+    cuboid: 54,
+    pyramid: 75,
   };
   /** Initial drop placement. Items are laid out on a loose 3D grid that fills the
    * bin (so they spawn together as a compact cloud, not a tall column): `cell` is
@@ -149,7 +149,7 @@ export class FactoryMatchConfig {
     baseY: 3.5,
     jitter: 0.5,
     // Each item spawns rotated by a RANDOM multiple of `spinStepDegrees` about the
-    // `spinAxis`, so identical models (e.g. guitars) don't all line up the same
+    // `spinAxis`, so identical shapes (e.g. cylinders) don't all line up the same
     // way. 90° → one of 0/90/180/270. Set spinStepDegrees to 0 to disable. The box
     // colliders are symmetric, so this only changes how the items look.
     spinAxis: "x" as "x" | "y" | "z",
@@ -232,6 +232,7 @@ export class FactoryMatchConfig {
     startAngle: 90, // 6 o'clock (bottom); the fill sweeps clockwise from here
     trackColor: 0x1c2430, // faint full-circle track behind the fill
     trackAlpha: 0.55,
+    bgColor: 0x39414f, // filled circle behind the ring + multiplier text (replaces the bg texture)
     palette: [0x49d17a, 0x3fa9f5, 0xb061f0, 0xff9f43, 0xff5b5b], // per-level colour cycle
   };
 
@@ -250,8 +251,8 @@ export class FactoryMatchConfig {
     springMatchCount: 5, // matches to charge the spring booster
     fanColor: 0xc82fff,
     springColor: 0x2cb8ff,
-    ringRadiusScale: 0.43, // ring radius as a fraction of the booster design height
-    ringOffsetY: -2, // vertical position nudge of the ring (design px; negative = up)
+    ringRadiusScale: 0.53, // ring radius as a fraction of the booster design height
+    ringOffsetY: 0, // vertical position nudge of the ring (design px; negative = up)
     activeIconOffsetY: -2, // vertical nudge of the ACTIVE icon art only (design px; negative = up) — corrects active art that sits lower in its frame than the passive
     ringWidth: 8,
     startAngle: -90, // 12 o'clock; fills clockwise
@@ -330,9 +331,9 @@ export class FactoryMatchConfig {
    * `target` is the displayed count. Placeholder wiring — goal art + completion
    * rules come later; for now they render their bg + count text. */
   public readonly goals: { kind: Kind; target: number }[] = [
-    { kind: "dice", target: 18 },
-    { kind: "radio", target: 18 },
-    { kind: "billardball", target: 18 },
+    { kind: "cube", target: 18 },
+    { kind: "cuboid", target: 18 },
+    { kind: "sphere", target: 18 },
   ];
 
   /** HUD layout (screen pixels). `topY` is the timer + score row centre; `goalsY`
@@ -347,14 +348,16 @@ export class FactoryMatchConfig {
     goalTextY: 24,
     goalIconH: 46,
     goalIconY: -14,
+    goalBgColor: 0x39414f, // tint for the goal-chip panel asset (UI_Panel.svg)
     goalPulseScale: 1.2, // peak scale of a goal chip's pop when its count ticks down
     goalPulseDuration: 0.14, // half-duration of the pop (up, then back) (seconds)
     goalDoneTick: "✓", // shown in place of the count once a goal is fully collected
     goalDoneTickColor: 0x4cd964, // green tick colour
-    goalDoneBgTint: 0x5e6b7a, // a completed goal's bg + item icon are tinted to this muted colour (full opacity)
+    goalDoneBgTint: 0x5e6b7a, // a completed goal's panel is tinted to this muted colour (the item icon keeps its kind colour)
     boosterScale: 0.18, // bottom booster icon height as a fraction of the game-screen width (scales with screen size)
     bannerScale: 0.82, // end-of-game banner width as a fraction of the game-screen width (scales with screen size)
     cashColor: 0x15eb4e, // colour of the CASH "$N" text
+    cashBgColor: 0x39414f, // tint for the cash pill panel asset (UI_Pill.svg)
     cashPulseScale: 1.25, // peak scale of the cash pill's pop on each increase
     cashPulseDuration: 0.12, // half-duration of that pop (up, then back) in seconds
     timerWarnSeconds: 10, // the timer turns red + blinks once this many seconds remain

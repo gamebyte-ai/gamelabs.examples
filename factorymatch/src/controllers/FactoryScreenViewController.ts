@@ -2,7 +2,8 @@ import { UnsubscribeBag, type IInstanceResolver, type IViewController } from "@g
 
 import type { IFactoryScreenView } from "../views/IFactoryScreenView.js";
 import { IGameModel } from "../models/IGameModel.js";
-import type { IGameModel as IGameModelType, GameStatus } from "../models/IGameModel.js";
+import type { IGameModel as IGameModelType } from "../models/IGameModel.js";
+import type { GameStatus } from "../constants/GameStatus.js";
 import { TimerModel } from "../models/TimerModel.js";
 import { GameEvents } from "../events/GameEvents.js";
 import { FactoryMatchConfig } from "../FactoryMatchConfig.js";

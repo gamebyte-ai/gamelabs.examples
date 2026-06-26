@@ -1,35 +1,19 @@
-import type { Kind } from "./models/IGameModel.js";
-
 /** HUD texture asset ids (namespaced), loaded via the AssetManager pipeline in
  * FactoryMatchApp.loadAssets and resolved in the screen view with
  * `assetLoader.getAsset(...)`. */
 export enum FactoryMatchAssetIds {
-  // HUD chrome.
-  TimerBg = "FactoryMatch.TimerBg",
-  GoalBg = "FactoryMatch.GoalBg",
-  MultiplierBg = "FactoryMatch.MultiplierBg",
-  // End-of-game banners.
-  ResultAllClear = "FactoryMatch.ResultAllClear", // won
-  ResultTimeIsUp = "FactoryMatch.ResultTimeIsUp", // lost — countdown hit zero
-  ResultGameOver = "FactoryMatch.ResultGameOver", // lost — tray full
-  // Goal chip icons (2D, per kind).
-  GoalIconDice = "FactoryMatch.GoalIconDice",
-  GoalIconRadio = "FactoryMatch.GoalIconRadio",
-  GoalIconBillard = "FactoryMatch.GoalIconBillard",
-  // Bottom-bar booster buttons (passive = charging, active = usable).
-  BoosterFan = "FactoryMatch.BoosterFan",
-  BoosterFanActive = "FactoryMatch.BoosterFanActive",
-  BoosterSpring = "FactoryMatch.BoosterSpring",
-  BoosterSpringActive = "FactoryMatch.BoosterSpringActive",
-  // Start-of-game countdown numbers (3, 2, 1).
-  CountdownNum1 = "FactoryMatch.CountdownNum1",
-  CountdownNum2 = "FactoryMatch.CountdownNum2",
-  CountdownNum3 = "FactoryMatch.CountdownNum3",
+  // Placeholder UI shapes (white SVGs, tinted in code). These are the shapes the
+  // HUD draws — the cash pill uses the pill, combo badge + booster discs the circle,
+  // goal chips the panel, and each goal icon its primitive shape. Swap the SVG files
+  // in assets/ui to re-skin; the screen view just tints + scales them.
+  UiPill = "FactoryMatch.UiPill",
+  UiCircle = "FactoryMatch.UiCircle",
+  UiPanel = "FactoryMatch.UiPanel",
+  ShapeCube = "FactoryMatch.ShapeCube",
+  ShapeSphere = "FactoryMatch.ShapeSphere",
+  ShapeCylinder = "FactoryMatch.ShapeCylinder",
+  ShapeCuboid = "FactoryMatch.ShapeCuboid",
+  ShapePyramid = "FactoryMatch.ShapePyramid",
+  // End-of-game result is drawn as text in the screen view — no banner art.
+  // Start-of-game countdown is drawn as text in the screen view — no number art.
 }
-
-/** Goal-chip icon per kind. Kinds without an icon render their count only. */
-export const GOAL_ICON_BY_KIND: Partial<Record<Kind, FactoryMatchAssetIds>> = {
-  dice: FactoryMatchAssetIds.GoalIconDice,
-  radio: FactoryMatchAssetIds.GoalIconRadio,
-  billardball: FactoryMatchAssetIds.GoalIconBillard,
-};
