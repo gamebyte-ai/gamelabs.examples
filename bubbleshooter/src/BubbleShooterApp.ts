@@ -408,7 +408,7 @@ export class BubbleShooterApp extends GamelabsApp {
     this._timelineManager = this.diContainer.getInstance(TimelineManager);
 
     this._gameAreaView = this.viewFactory.createView(GameAreaView);
-    this.world.addView(this._gameAreaView);
+    this.world.addRootView(this._gameAreaView);
 
     this._cameraManager = this.diContainer.getInstance(GameCameraManager);
     this._cameraManager.initialize(this.world);

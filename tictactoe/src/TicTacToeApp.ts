@@ -59,7 +59,7 @@ export class TicTacToeApp extends GamelabsApp {
     const gridOps = this.diContainer.getInstance(GridOperations);
     gridOps.createGrid();
     this._gameGridView = this.viewFactory.createView(GameGridsView);
-    this.world.addView(this._gameGridView);
+    this.world.addRootView(this._gameGridView);
 
     this._cameraManager = this.diContainer.getInstance(GameCameraManager);
     this._cameraManager.initialize(this.world);

@@ -148,9 +148,9 @@ export class HexaSortApp extends GamelabsApp {
 
     // World views.
     this._gridView = this.viewFactory.createView(HexGridView);
-    this.world.addView(this._gridView);
+    this.world.addRootView(this._gridView);
     this._trayView = this.viewFactory.createView(StacksTrayView);
-    this.world.addView(this._trayView);
+    this.world.addRootView(this._trayView);
 
     // Camera. `register()` wires the controller into the camera manager;
     // no unregister / destroy hook exists today, so the ref is local.

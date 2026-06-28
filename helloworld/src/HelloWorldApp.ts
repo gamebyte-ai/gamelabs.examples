@@ -77,7 +77,7 @@ export class HelloWorldApp extends GamelabsApp {
 
     // Cube
     this._cubeView = this.viewFactory.createView(CubeView);
-    this.world.addView(this._cubeView);
+    this.world.addRootView(this._cubeView);
     this._orbitalController.followObject(this._cubeView, 8);
 
     this.canvas.addEventListener("wheel", this._onOrbitalWheel, { passive: true });

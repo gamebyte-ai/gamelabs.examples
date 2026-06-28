@@ -158,7 +158,7 @@ export class ColorBlockJamApp extends GamelabsApp {
       .createScreen(ColorBlockJamUIIds.GameScreen, this._config.transitions.gameScreenEnter);
 
     this._boardView = this.viewFactory.createView(BoardView);
-    this.world.addView(this._boardView);
+    this.world.addRootView(this._boardView);
 
     // Apply persisted audio settings once and then keep them in sync
     // with the settings popup.

@@ -176,11 +176,11 @@ export class TowerDefenseApp extends GamelabsApp {
     );
 
     // Grid world view
-    this.world.addView(this.viewFactory.createView(GameBoardsView));
+    this.world.addRootView(this.viewFactory.createView(GameBoardsView));
 
     // Scene host view (owns enemy/combat containers + base HP bar).
     this._sceneView = this.viewFactory.createView(GameSceneView);
-    this.world.addView(this._sceneView);
+    this.world.addRootView(this._sceneView);
 
     // Center the grid around the origin
     const grid = this.diContainer.getInstance(GridsModel).getGrid(TowerDefenseConfig.GRID_ID);

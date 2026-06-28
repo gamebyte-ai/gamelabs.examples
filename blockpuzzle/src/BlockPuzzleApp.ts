@@ -182,7 +182,7 @@ export class BlockPuzzleApp extends GamelabsApp {
     // the scene. Module registration alone only registers the pair
     // with the view factory — nothing renders until the app
     // constructs the view here.
-    this.world.addView(this.viewFactory.createView(GameBoardsView));
+    this.world.addRootView(this.viewFactory.createView(GameBoardsView));
 
     // Build + register both grids. They share `GridEvents` /
     // `GridsModel`; the controller's `onGridAdded` handler creates
