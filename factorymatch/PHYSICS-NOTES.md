@@ -1,21 +1,19 @@
-# FactoryMatch — Physics notes & framework-change handoff
+# FactoryMatch — Physics design notes
 
-This file preserves the physics work done for FactoryMatch so that:
+> **Status: RESOLVED (framework 4.0.0).** The `sleep` / `wakeUp` /
+> `setDefaultFriction` additions were merged into `gamelabs.js` `main` as part of
+> **v4.0.0** (`feat/physics3d-sleep-wake` → main). FactoryOperations now uses the
+> full **regional wake/sleep + fan-fluidise** design directly again (no decoupling).
+> Sections 1–2 below document that design + the framework APIs it relies on; §3
+> (the temporary main-compatible decoupling) is kept only as historical record —
+> it is **no longer the code that ships**.
 
-1. The **gamelabs.js maintainer** can review the framework additions independently
-   and decide whether to merge them.
-2. The example's **regional wake/sleep + fan-fluidise** design is not lost — it can
-   be restored verbatim once (if) the framework changes land on `main`.
+This file documents the physics design so it stays understandable:
 
-Status when this file was written:
-
-- Framework (`gamelabs.js`) changes live **only** on branch
-  `feat/physics3d-sleep-wake` (also on `origin`). `gamelabs.js` working tree is on
-  `main`. **Do not touch that branch** — it is pending maintainer review.
-- The example (`gamelabs.examples/factorymatch`) has been **decoupled** from those
-  framework changes so it builds and runs against `main` (see
-  "Main-compatible version" below). The framework-dependent code documented here
-  was removed from `FactoryOperations.ts`.
+1. The framework APIs it depends on (now in gamelabs.js ≥ 4.0.0).
+2. The regional wake/sleep + fan-fluidise system in `FactoryOperations.ts`.
+3. *(historical)* the interim main-compatible version used while the framework
+   change was un-merged — no longer active.
 
 ---
 

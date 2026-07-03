@@ -105,7 +105,7 @@ export class FactoryMatchApp extends GamelabsApp {
     // 3D game objects live in the World view; PileView resolves World for the camera + pick ray.
     this.viewDiContainer.bindInstance(World, this.world);
     this._pileView = this.viewFactory.createView(PileView);
-    this.world.addView(this._pileView);
+    this.world.addRootView(this._pileView);
 
     this.diContainer.getInstance(UIEvents).createScreen(FactoryMatchUIIds.GameScreen, this._config.transitions.gameScreenEnter);
   }

@@ -62,10 +62,18 @@ export class FactoryOperations {
   /** Logical slot contents, by unique item id. */
   private _slots: SlotItem[] = [];
   private _nextItemId = 1;
+  /** Per-body wake windows: bodyId → seconds of physics still owed. Only these
+   * bodies get the gravity-correction (+ swirl) force, so everything else sleeps
+   * and never jitters. A pick wakes just the items near it; the fan/initial drop
+   * wake all of them. The world is stepped while any body is awake. */
+  private readonly _active = new Map<BodyId, number>();
   /** Seconds until the next pick is allowed (input cooldown after a collect). */
   private _pickCooldown = 0;
   /** Seconds of fan-booster swirl still owed (tornado force on the pile). */
   private _swirl = 0;
+  /** True while the fan has temporarily lowered item↔item friction (fluidising the
+   * pile); restored when the swirl ends. */
+  private _fanFrictionOn = false;
   /** Remaining count per goal (parallel to config.goals), counted down on collect. */
   private _goalRemaining: number[] = [];
   /** Combo multiplier state: `_comboLevel` (≥1, the displayed x-factor) and
@@ -103,6 +111,9 @@ export class FactoryOperations {
     this._stage!.clear();
     this._pile.clear();
     this._pickLock.clear();
+    this._active.clear();
+    this._physics!.setDefaultFriction(this._config!.physics.friction); // clear any leftover fan fluidising
+    this._fanFrictionOn = false;
     this._slots = [];
     this._nextItemId = 1;
     this._model!.reset();
@@ -116,8 +127,7 @@ export class FactoryOperations {
 
     this._buildBin();
     this._buildPile();
-    // Freshly spawned bodies are awake and fall under world gravity; cannon's
-    // auto-sleep settles them once at rest (no manual wake window needed).
+    this._wakeAll(this._config!.physics.initialSettleSeconds); // first drop simulates, then sleeps
   }
 
   /** Bin colliders only (no meshes). Walls use a tall collider so shapes can't bounce out. */
@@ -242,15 +252,40 @@ export class FactoryOperations {
     };
   }
 
-  //  WAKE — nudge a region awake after a pick (cannon auto-sleep handles re-settling)
+  //  WAKE — which bodies get simulated (everything else sleeps, so it can't jitter)
+
+  /** Wake body `id` (un-sleep it) and keep it awake for at least `seconds` (never
+   * shortens an existing window). */
+  private _wakeBody(id: BodyId, seconds: number): void {
+    if (seconds > (this._active.get(id) ?? 0)) this._active.set(id, seconds);
+    this._physics!.wakeUp(id);
+  }
+
+  /** Wake the whole pile (the fan tornado + the opening drop act on everything). */
+  private _wakeAll(seconds: number): void {
+    for (const id of this._pile.keys()) this._wakeBody(id, seconds);
+  }
+
+  /** Freeze a body: zero its (linear + angular) velocity, THEN sleep it. Zeroing
+   * first matters because cannon stores velocity through sleep — without this a
+   * body resumes its stale velocity the moment it's woken again. */
+  private _freeze(id: BodyId): void {
+    this._physics!.setVelocity(id, 0, 0, 0); // also wakes it…
+    this._physics!.setAngularVelocity(id, 0, 0, 0);
+    this._physics!.sleep(id); // …then re-sleep, now at rest
+  }
+
+  /** Put every pile body to sleep (at rest) so the solver skips it — a frozen pile
+   * can't jitter, and a later pick wakes only the bodies near it. */
+  private _sleepAll(): void {
+    for (const id of this._pile.keys()) this._freeze(id);
+  }
 
   /** Wake the pile bodies a vertical cylinder touches — radius `pickWake.radius`
-   * around (cx,cz), with its BASE at (cy) rising `pickWake.height` — so the stack
-   * ABOVE a removed item resettles into the gap. Removing a body fires no contact,
-   * so the sleeping supporters above it must be woken explicitly; bodies below stay
-   * asleep as the support. Horizontal distance only; capped to `max`. Waking is via
-   * `setVelocity(0,0,0)`, which the manager turns into a `wakeUp`. */
-  private _wakeColumn(cx: number, cy: number, cz: number): void {
+   * around (cx,cz), with its BASE at the pick (cy) rising `pickWake.height` — so
+   * the picked item and the stack ABOVE it resettle while everything below stays
+   * asleep (it's the support). Horizontal distance only; capped to `max`. */
+  private _wakeColumn(cx: number, cy: number, cz: number, seconds: number): void {
     const pw = this._config!.pickWake;
     const r2 = pw.radius * pw.radius;
     const yMin = cy;
@@ -268,7 +303,7 @@ export class FactoryOperations {
       hits.sort((a, b) => a.d2 - b.d2);
       hits.length = pw.max;
     }
-    for (const h of hits) this._physics!.setVelocity(h.id, 0, 0, 0); // wakes it; gravity takes over
+    for (const h of hits) this._wakeBody(h.id, seconds);
   }
 
   //  PICK — collect a specific pile body (chosen by the view's visual raycast)
@@ -321,9 +356,9 @@ export class FactoryOperations {
     const kick = (): number => (Math.random() * 2 - 1) * s.throwKick;
     this._physics!.setVelocity(id, kick(), -s.throwSpeed, kick());
     this._pickLock.set(id, s.pickLock); // not re-pickable until it has dropped into the pool
-    // The thrown body is already awake (just spawned + given velocity); wake the
-    // column it's about to crash into so the pile opens up and resettles.
-    this._wakeColumn(x, y, z);
+    // Wake the dropped item + the column it lands in, then let them sleep.
+    this._wakeBody(id, s.settle);
+    this._wakeColumn(x, y, z, s.settle);
   }
 
   /** Fan booster: spin the pile into a clockwise tornado for a few seconds. */
@@ -334,11 +369,15 @@ export class FactoryOperations {
     this._triggerSwirl();
   }
 
-  /** Start the tornado over the WHOLE pile. The per-frame swirl in `update` sets
-   * each item's velocity along the spiral field, which also wakes any sleeping
-   * body — so no explicit wake (or friction change) is needed here. */
+  /** Start the tornado over the WHOLE pile: wake everything through the swirl AND a
+   * settle window after, and drop friction so items slide freely while the spiral
+   * velocity field drives them (see `update`). */
   private _triggerSwirl(): void {
-    this._swirl = this._config!.fan.duration;
+    const fan = this._config!.fan;
+    this._swirl = fan.duration;
+    this._wakeAll(fan.duration + fan.settleAfter);
+    this._physics!.setDefaultFriction(fan.friction);
+    this._fanFrictionOn = true;
   }
 
   /** Swirl strength multiplier 0→1→0 across the booster's life: smoothstep ramp-in
@@ -385,9 +424,10 @@ export class FactoryOperations {
     const from = { x: t.x, y: t.y, z: t.z };
     this._stage!.despawn(bodyId); // collider off — the shape leaves the simulation
     this._pile.delete(bodyId);
-    // Wake the vertical column over the gap so the stack above it falls in and
-    // resettles (everything else stays asleep until a collision wakes it).
-    this._wakeColumn(from.x, from.y, from.z);
+    this._active.delete(bodyId); // it's gone — drop any wake window it held
+    // Wake only the vertical column centred on the gap so it resettles in; the
+    // rest of the pile stays asleep (no global jitter). Never shortens a window.
+    this._wakeColumn(from.x, from.y, from.z, cfg.physics.settleSeconds);
     this._pickCooldown = cfg.pickCooldown; // block the next pick briefly
 
     const addedId = this._nextItemId++;
@@ -502,23 +542,44 @@ export class FactoryOperations {
 
   //  PER-FRAME / LIFECYCLE
 
-  /** True while a pile exists; the app gates `physics.step` on it. cannon's
-   * auto-sleep makes stepping a fully-settled pile cheap — the solver skips
-   * sleeping bodies, so there's no need to track wake windows ourselves. */
+  /** True while any body is awake; the app gates `physics.step` on it. */
   public get physicsActive(): boolean {
-    return this._pile.size > 0;
+    return this._active.size > 0;
   }
 
   public update(dt: number): void {
     this._stage!.sync();
-    // Speed cap: rein in any moving body the step over-accelerated (squeeze/collision
-    // ejections, worst at the packed initial drop). Scales velocity back to maxSpeed,
-    // keeping direction. Sleeping bodies read ~0 velocity, so they're skipped (and not
-    // woken). Runs pre-playing too, so the opening drop is capped.
-    const maxSpeed = this._config!.physics.maxSpeed;
-    if (maxSpeed > 0 && this._pile.size > 0) {
-      const max2 = maxSpeed * maxSpeed;
+    // Burn down per-body wake windows; a body whose window ends is put back to
+    // sleep where it rests. Runs even during the countdown so the opening drop
+    // settles. When the last window ends, sleep the WHOLE pile to catch any bodies
+    // a falling neighbour woke by collision, leaving a clean frozen pile.
+    const hadActive = this._active.size > 0;
+    for (const [id, left] of this._active) {
+      const next = left - dt;
+      if (next > 0 && this._pile.has(id)) {
+        this._active.set(id, next);
+      } else {
+        this._active.delete(id);
+        if (this._pile.has(id)) this._freeze(id); // zero velocity, then sleep
+      }
+    }
+    if (hadActive && this._active.size === 0) this._sleepAll();
+    // Strict containment: a falling woken item bumps sleeping neighbours, and
+    // cannon auto-wakes them on contact — which would spread motion past the wake
+    // cylinder. So each frame, force any pile body that ISN'T in the wake set back
+    // to sleep; collision-woken strays freeze before they can move or propagate.
+    if (this._active.size > 0) {
       for (const id of this._pile.keys()) {
+        if (!this._active.has(id)) this._freeze(id);
+      }
+    }
+    // Speed cap: rein in any awake body the step over-accelerated (squeeze/collision
+    // ejections, worst at the packed initial drop). Runs pre-playing too, so the
+    // opening drop is capped. Scales velocity back to maxSpeed, keeping direction.
+    const maxSpeed = this._config!.physics.maxSpeed;
+    if (maxSpeed > 0 && this._active.size > 0) {
+      const max2 = maxSpeed * maxSpeed;
+      for (const id of this._active.keys()) {
         const v = this._physics!.getVelocity(id, this._v);
         const sp2 = v.x * v.x + v.y * v.y + v.z * v.z;
         if (sp2 > max2) {
@@ -535,63 +596,81 @@ export class FactoryOperations {
       else this._pickLock.set(id, next);
     }
     // The clock only runs once play has begun (after the intro countdown) and
-    // while playing; hitting zero ends the game.
+    // while playing; hitting zero ends the game. Gated on `time.enabled` — the timer
+    // HUD was removed, so by default the timer neither ticks nor loses on time.
     if (!this._model!.started || this._model!.status !== "playing") return;
-    this._timer!.tick(dt);
-    if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
+    if (this._config!.time.enabled) {
+      this._timer!.tick(dt);
+      if (this._timer!.elapsedSeconds >= this._config!.time.startSeconds) this._model!.setLost("time");
+    }
     this._decayCombo(dt); // the combo ring drains continuously while playing
 
-    // Fan tornado: while the swirl runs, SET each item's velocity to the spiral
-    // field (a reliable tornado regardless of packing; setting velocity also wakes
-    // any sleeping body). When it's not running we leave the pile to world gravity +
-    // auto-sleep — no per-body force, so settled items sleep and the pile doesn't
-    // jitter on every pick.
-    if (this._swirl > 0 && this._pile.size > 0) {
+    // Drive the AWAKE bodies. While the fan blows we SET each item's velocity to a
+    // spiral field (reliable tornado regardless of packing); otherwise we apply the
+    // gravity correction (drop → after-start play gravity). Asleep bodies are left
+    // alone, so the pile doesn't jitter on every pick.
+    if (this._active.size > 0) {
+      const phys = this._config!.physics;
       const fan = this._config!.fan;
-      // Ease the spiral in/out (smoothstep over `ramp`) so it doesn't snap.
-      const intensity = this._swirlIntensity();
-      const omega = fan.angularSpeed * fan.direction * intensity;
-      const rise = fan.riseSpeed * intensity;
-      // Blend the spiral target with each body's CURRENT velocity instead of
-      // hard-setting it: this keeps a share of the solver's collision-separation
-      // each frame, so packed items can't interpenetrate and then explode apart
-      // when the fan releases. Lower = softer/smoother, higher = crisper spin.
-      const b = fan.velocityBlend;
-      const core = fan.coreRadius;
-      // The swirl AXIS travels in a circle inside the pool so the tornado sweeps
-      // toward each wall in turn (items get pushed against the walls and churn =
-      // mixing). It eases out from / back to the pool centre with the ramp, so it
-      // starts and ends centred.
-      const elapsed = fan.duration - this._swirl;
-      const ca = elapsed * fan.centerOrbitSpeed;
-      const cx = Math.cos(ca) * fan.centerOrbitRadius * intensity;
-      const cz = Math.sin(ca) * fan.centerOrbitRadius * intensity;
-      for (const id of this._pile.keys()) {
-        const t = this._physics!.getTransform(id, this._t);
-        const dx = t.x - cx; // position relative to the moving swirl axis
-        const dz = t.z - cz;
-        const rr = Math.hypot(dx, dz);
-        const r = rr || 1;
-        // Outward unit (radial); for an item on the axis, pick a direction so it
-        // still gets ejected instead of sitting there.
-        let ux = dx / r;
-        let uz = dz / r;
-        if (rr < 1e-3) {
-          ux = 1;
-          uz = 0;
+      const swirling = this._swirl > 0;
+      if (swirling) {
+        // Ease the spiral in/out (smoothstep over `ramp`) so it doesn't snap.
+        const intensity = this._swirlIntensity();
+        const omega = fan.angularSpeed * fan.direction * intensity;
+        const rise = fan.riseSpeed * intensity;
+        // Blend the spiral target with each body's CURRENT velocity instead of
+        // hard-setting it: this keeps a share of the solver's collision-separation
+        // each frame, so packed items can't interpenetrate and then explode apart
+        // when the fan releases. Lower = softer/smoother, higher = crisper spin.
+        const b = fan.velocityBlend;
+        const core = fan.coreRadius;
+        // The swirl AXIS travels in a circle inside the pool so the tornado sweeps
+        // toward each wall in turn (items get pushed against the walls and churn =
+        // mixing). It eases out from / back to the pool centre with the ramp, so it
+        // starts and ends centred.
+        const elapsed = fan.duration - this._swirl;
+        const ca = elapsed * fan.centerOrbitSpeed;
+        const cx = Math.cos(ca) * fan.centerOrbitRadius * intensity;
+        const cz = Math.sin(ca) * fan.centerOrbitRadius * intensity;
+        for (const id of this._active.keys()) {
+          const t = this._physics!.getTransform(id, this._t);
+          const dx = t.x - cx; // position relative to the moving swirl axis
+          const dz = t.z - cz;
+          const rr = Math.hypot(dx, dz);
+          const r = rr || 1;
+          // Outward unit (radial); for an item on the axis, pick a direction so it
+          // still gets ejected instead of sitting there.
+          let ux = dx / r;
+          let uz = dz / r;
+          if (rr < 1e-3) {
+            ux = 1;
+            uz = 0;
+          }
+          // Radial drift: push OUT of the central core (carves the vortex hollow,
+          // strongest at the axis, fading to 0 at `coreRadius`), otherwise the
+          // gentle inward gather. Net + = outward, − = inward.
+          const out = rr < core ? fan.outwardSpeed * (1 - rr / core) : 0;
+          const radial = (out - fan.inwardSpeed) * intensity;
+          // Rigid rotation about the moving axis (v = ω × r) + radial + upward drift.
+          const tvx = omega * dz + ux * radial;
+          const tvz = -omega * dx + uz * radial;
+          const v = this._physics!.getVelocity(id, this._v);
+          this._physics!.setVelocity(id, v.x + (tvx - v.x) * b, v.y + (rise - v.y) * b, v.z + (tvz - v.z) * b);
         }
-        // Radial drift: push OUT of the central core (carves the vortex hollow,
-        // strongest at the axis, fading to 0 at `coreRadius`), otherwise the
-        // gentle inward gather. Net + = outward, − = inward.
-        const out = rr < core ? fan.outwardSpeed * (1 - rr / core) : 0;
-        const radial = (out - fan.inwardSpeed) * intensity;
-        // Rigid rotation about the moving axis (v = ω × r) + radial + upward drift.
-        const tvx = omega * dz + ux * radial;
-        const tvz = -omega * dx + uz * radial;
-        const v = this._physics!.getVelocity(id, this._v);
-        this._physics!.setVelocity(id, v.x + (tvx - v.x) * b, v.y + (rise - v.y) * b, v.z + (tvz - v.z) * b);
+        this._swirl = Math.max(0, this._swirl - dt);
+      } else {
+        // Per-body gravity correction (world gravity is fixed; mass 1 → force == accel).
+        const dg = phys.gravityAfterStart - phys.gravity;
+        if (dg !== 0) {
+          for (const id of this._active.keys()) this._physics!.applyForce(id, 0, dg, 0);
+        }
       }
-      this._swirl = Math.max(0, this._swirl - dt);
+    }
+    // The fan made the pile slippery (item↔item friction ~0) so it could fluidise;
+    // restore normal friction once the swirl ends so the pile stacks again.
+    if (this._fanFrictionOn && this._swirl <= 0) {
+      this._physics!.setDefaultFriction(this._config!.physics.friction);
+      this._fanFrictionOn = false;
     }
   }
 
@@ -604,6 +683,7 @@ export class FactoryOperations {
     this._binIds = [];
     this._stage?.clear();
     this._pile.clear();
+    this._active.clear();
     this._pickLock.clear();
     this._slots = [];
     this._physics = null;

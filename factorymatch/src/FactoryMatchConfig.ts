@@ -190,7 +190,7 @@ export class FactoryMatchConfig {
    * is visible (a tuning aid); `color`/`opacity` style it. */
   public readonly pickWake = {
     radius: 0.33,
-    height: 7,
+    height: 10,
     max: 0,
     show: false,
     color: 0x49d1ff,
@@ -323,9 +323,11 @@ export class FactoryMatchConfig {
     pickLock: 0.7, // seconds the returned item can't be re-picked after it spawns, so it must drop into the pool before it's clickable again
   };
 
-  /** Countdown clock shown top-centre. `startSeconds` is the time the player has;
-   * when it reaches zero the game is lost. Displayed as mm:ss. */
-  public readonly time = { startSeconds: 120 };
+  /** Countdown timer. `enabled` turns the timed mode on/off — the timer HUD was
+   * removed, so it's OFF by default (otherwise the clock keeps running in the
+   * background and loses with "time up" mid-game). Set `enabled: true` to bring
+   * back the timed mode. `startSeconds` is the time the player has once enabled. */
+  public readonly time = { enabled: false, startSeconds: 120 };
 
   /** HUD goal chips (3, shown below the timer). `kind` picks the model shown,
    * `target` is the displayed count. Placeholder wiring — goal art + completion
