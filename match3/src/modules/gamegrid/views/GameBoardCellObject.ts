@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { IAssetManager, IInputManager, IPointerInputHandler, RectGridPreset } from "@gamebyte/gamelabsjs";
+import type { IAssetManager, IWorldPointerInput, IPointerInputHandler, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridCellObject, GridCellObjectOptions, POINTER_INPUT_LAYER, type IGridObjectListener } from "@gamebyte/gamelabsjs";
 
 export class GameBoardCellObject extends GridCellObject implements IPointerInputHandler {
@@ -8,7 +8,7 @@ export class GameBoardCellObject extends GridCellObject implements IPointerInput
 
   public declare readonly preset: RectGridPreset;
 
-  public constructor(options: GridCellObjectOptions, pointerListener: IGridObjectListener, inputManager: IInputManager | null, assetManager?: IAssetManager | null) {
+  public constructor(options: GridCellObjectOptions, pointerListener: IGridObjectListener, inputManager: IWorldPointerInput | null, assetManager?: IAssetManager | null) {
     super(options, pointerListener, inputManager, assetManager);
   }
 

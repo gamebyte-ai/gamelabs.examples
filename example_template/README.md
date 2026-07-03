@@ -37,7 +37,7 @@ npm run dev
 ## Extending
 
 - Add an asset enum (`TemplateAssetIds.ts`) when you load assets, then enqueue them in `loadAssets()`.
-- Add a world view (extending `WorldViewBase`) and create it in `postInitialize()` via `this.viewFactory.createView(...)` + `this.world.addView(...)`.
+- Add a world view (extending `WorldViewBase`) and create it in `postInitialize()` via `this.viewFactory.createView(...)` + `this.world.addRootView(...)`.
 - Add modules (e.g. `GameCameraBinding`) in `registerModules()`.
 
 ## Common pitfalls

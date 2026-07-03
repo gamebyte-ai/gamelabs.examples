@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import gsap from "gsap";
-import type { IGridObjectListener, IInputManager, RectGridPreset } from "@gamebyte/gamelabsjs";
+import type { IGridObjectListener, IWorldPointerInput, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridItemObject } from "@gamebyte/gamelabsjs";
 import { Team } from "../../../constants/Team.js";
 import { TicTacToeAssetIds } from "../../../TicTacToeAssetIds.js";
@@ -11,7 +11,7 @@ export class GameItemObject extends GridItemObject {
 
   public declare readonly preset: RectGridPreset;
 
-  public constructor(options: GameItemObjectOptions, pointerListener: IGridObjectListener, inputManager: IInputManager | null, assetManager?: import("@gamebyte/gamelabsjs").IAssetManager | null) {
+  public constructor(options: GameItemObjectOptions, pointerListener: IGridObjectListener, inputManager: IWorldPointerInput | null, assetManager?: import("@gamebyte/gamelabsjs").IAssetManager | null) {
     super(options, pointerListener, inputManager, assetManager);
   }
 

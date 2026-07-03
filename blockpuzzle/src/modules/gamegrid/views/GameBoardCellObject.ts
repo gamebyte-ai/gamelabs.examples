@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { IAssetManager, IInputManager, RectGridPreset } from "@gamebyte/gamelabsjs";
+import type { IAssetManager, IWorldPointerInput, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridCellObject, GridCellObjectOptions, type IGridObjectListener } from "@gamebyte/gamelabsjs";
 import type { BoardPalette } from "../../../BlockPuzzleConfig";
 
@@ -26,7 +26,7 @@ export class GameBoardCellObject extends GridCellObject {
   public constructor(
     options: GridCellObjectOptions,
     pointerListener: IGridObjectListener,
-    inputManager: IInputManager | null,
+    inputManager: IWorldPointerInput | null,
     assetManager: IAssetManager | null,
     palette: BoardPalette,
   ) {

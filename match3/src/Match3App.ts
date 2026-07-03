@@ -73,7 +73,7 @@ export class Match3App extends GamelabsApp {
     settings.addField(new SettingsNumberField("sfxVolume", "SFX Volume", 100, 0, 100, 5));
 
     this.diContainer.getInstance(UIEvents).createScreen(Match3UIIds.GameScreen, this._config.transitions.gameScreenEnter);
-    this.world.addView(this.viewFactory.createView(GameBoardsView));
+    this.world.addRootView(this.viewFactory.createView(GameBoardsView));
 
     const grid = this.diContainer.getInstance(GridsModel).getGrid(Match3Config.GRID_ID);
     if (grid) {

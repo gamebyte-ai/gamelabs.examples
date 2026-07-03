@@ -117,7 +117,7 @@ export class SolitaireApp extends GamelabsApp {
     this._cameraController = new Topdown2dCameraController(this._cameraManager).register();
 
     this._boardView = this.viewFactory.createView(BoardView);
-    this.world.addView(this._boardView);
+    this.world.addRootView(this._boardView);
 
     this.updateCameraFit(this.width, this.height);
 

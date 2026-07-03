@@ -5,7 +5,7 @@ const repoRootPath = decodeURIComponent(new URL("../..", import.meta.url).pathna
 export default defineConfig({
   base: "./",
   optimizeDeps: {
-    include: ["typed-signals"],
+    include: ["typed-signals", "pixi.js", "@pixi/layout", "@pixi/ui"],
     // Prevent Vite from caching a stale local build of the framework so rebuilds are picked up immediately.
     exclude: ["@gamebyte/gamelabsjs"]
   },

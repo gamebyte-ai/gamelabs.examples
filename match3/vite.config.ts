@@ -5,7 +5,7 @@ const repoRootPath = decodeURIComponent(new URL("../..", import.meta.url).pathna
 export default defineConfig({
   base: "./",
   optimizeDeps: {
-    include: ["typed-signals"],
+    include: ["typed-signals", "pixi.js", "@pixi/layout", "@pixi/ui"],
     exclude: ["@gamebyte/gamelabsjs"]
   },
   resolve: {

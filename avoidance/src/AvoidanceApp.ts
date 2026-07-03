@@ -156,7 +156,7 @@ export class AvoidanceApp extends GamelabsApp {
     this._fitCamera(this.width, this.height);
 
     this._gameAreaView = this.viewFactory.createView(GameAreaView);
-    this.world.addView(this._gameAreaView);
+    this.world.addRootView(this._gameAreaView);
 
     this.diContainer.getInstance(UIEvents).createScreen(AvoidanceUIIds.GameScreen, this._config.transitions.gameScreenEnter);
   }
