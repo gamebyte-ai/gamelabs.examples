@@ -8,7 +8,7 @@ const __dirname = dirname(__filename);
 export default defineConfig({
   base: "./",
   optimizeDeps: {
-    include: ["typed-signals"],
+    include: ["typed-signals", "pixi.js", "@pixi/layout", "@pixi/ui"],
     exclude: ["@gamebyte/gamelabsjs"]
   },
   resolve: {

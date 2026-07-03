@@ -6,7 +6,7 @@ export default defineConfig({
   base: "./",
   optimizeDeps: {
     // cannon-es is reached through the framework's physics3d subpath — pre-bundle it.
-    include: ["typed-signals", "cannon-es", "gsap"],
+    include: ["typed-signals", "pixi.js", "@pixi/layout", "@pixi/ui", "cannon-es", "gsap"],
     exclude: ["@gamebyte/gamelabsjs"],
   },
   resolve: {
