@@ -138,7 +138,11 @@ export class BubbleShooterApp extends GamelabsApp {
   private _aimAidVisible = false;
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override registerModules(): void {

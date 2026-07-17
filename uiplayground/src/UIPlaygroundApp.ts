@@ -73,7 +73,11 @@ export class UIPlaygroundApp extends GamelabsApp {
   private readonly _settingsBinding = new SettingsBinding({ audioFields: true });
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override registerModules(): void {

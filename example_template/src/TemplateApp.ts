@@ -10,7 +10,11 @@ export class TemplateApp extends GamelabsApp {
   private readonly _config = new TemplateConfig();
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override configureDI(): void {

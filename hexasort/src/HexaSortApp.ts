@@ -77,7 +77,11 @@ export class HexaSortApp extends GamelabsApp {
   private readonly _systemUnsubs = new UnsubscribeBag();
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override registerModules(): void {

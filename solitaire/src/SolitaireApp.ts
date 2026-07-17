@@ -56,7 +56,11 @@ export class SolitaireApp extends GamelabsApp {
   private _modeChangeUnsub: Unsubscribe | null = null;
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override registerModules(): void {
