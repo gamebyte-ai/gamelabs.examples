@@ -81,8 +81,12 @@ export class TowerDefenseApp extends GamelabsApp {
   private _popupCount = 0;
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
     this._gameState = new GameState(this._config.startingGold, this._config.baseHp);
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────

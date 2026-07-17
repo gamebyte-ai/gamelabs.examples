@@ -22,7 +22,11 @@ export class TicTacToeApp extends GamelabsApp {
   private _cameraManager: GameCameraManager | null = null;
 
   constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl });
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override registerModules(): void {

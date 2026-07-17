@@ -11,7 +11,7 @@
   "dependencies": {
     "@pixi/layout": "^3.2.0",
     "@pixi/ui": "^2.3.2",
-    "@gamebyte/gamelabsjs": "^4.0.0",
+    "@gamebyte/gamelabsjs": "^4.2.0",
     "matter-js": "^0.20.0",
     "pixi.js": "^8.16.0",
     "three": "^0.182.0",

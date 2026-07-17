@@ -21,6 +21,7 @@ export class CastleCrushersApp extends GamelabsApp {
     const config = new CastleCrushersConfig();
     super({
       mount: stageEl,
+      configOverridesUrl: "./game-config.json",
       // Lock the play area to the 1280x720 design aspect so the game never
       // stretches: the framework pillarboxes/letterboxes both canvases and the
       // surrounding bars (this color) are inert dead-zones. The view then only
@@ -32,6 +33,10 @@ export class CastleCrushersApp extends GamelabsApp {
       },
     });
     this._config = config;
+  }
+
+  protected override getOverridableConfig(): object {
+    return this._config;
   }
 
   protected override registerModules(): void {
