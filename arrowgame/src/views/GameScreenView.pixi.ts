@@ -23,12 +23,22 @@ function labelStyle(fontSize: number): PIXI.TextStyle {
   });
 }
 
+/** Small, clean level-label style: no outline. Size/color come from config. */
+function levelLabelStyle(fontSize: number, color: number): PIXI.TextStyle {
+  return new PIXI.TextStyle({
+    fontFamily: FONT,
+    fontSize,
+    fontWeight: "600",
+    fill: color,
+  });
+}
+
 /**
  * HUD (2D) overlay: level label (top), restart button (top-right),
  * and a level-complete overlay with a NEXT button.
  */
 export class GameScreenView extends ScreenView implements IGameScreenView {
-  private readonly _levelLabel = new PIXI.Text({ text: "", style: labelStyle(30) });
+  private readonly _levelLabel = new PIXI.Text({ text: "", style: levelLabelStyle(18, 0x3a3550) });
   private _restartBtn: PIXI.Container | null = null;
 
   // Level complete overlay.
@@ -41,6 +51,7 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
 
   private _config: ArrowGameConfig | null = null;
   private _board: Board2D | null = null;
+  private readonly _bg = new PIXI.Graphics();
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -50,12 +61,17 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   public override postInitialize(): void {
     super.postInitialize();
 
-    // 2D board (dot grid + rope arrows) — added FIRST so it sits behind the HUD.
-    const arrowTex = this.assetLoader.getAsset<PIXI.Texture>(ArrowGameAssetIds.ArrowUp) ?? null;
-    this._board = new Board2D(this._config ?? new ArrowGameConfig(), arrowTex);
+    // Warm gradient backdrop — added FIRST so everything draws on top of it.
+    this.addChild(this._bg);
+
+    // 2D board (dot grid + rope arrows) — behind the HUD, above the background.
+    this._board = new Board2D(this._config ?? new ArrowGameConfig());
     this.addChild(this._board);
 
     this._levelLabel.anchor.set(0.5, 0);
+    if (this._config) {
+      this._levelLabel.style = levelLabelStyle(this._config.levelLabelSize, this._config.levelLabelColor);
+    }
     this.addChild(this._levelLabel);
 
     this._restartBtn = this.buildIconButton(ArrowGameAssetIds.BtnRestart, 64, () => this._restartCb?.());
@@ -187,6 +203,11 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   // safeAreaInsets getter on HudViewBase, so use conservative constants.
   private static readonly SAFE_TOP = 59;
   private static readonly SAFE_SIDE = 12;
+  // Board keep-out bands: top covers the safe area + level label + restart button
+  // (restart sits at SAFE_TOP+40 with a 64px icon → ~131px); bottom leaves room
+  // for the home indicator.
+  private static readonly BOARD_TOP_RESERVE = 140;
+  private static readonly BOARD_BOTTOM_RESERVE = 40;
 
   public override onResize(width: number, height: number, dpr: number): void {
     super.onResize(width, height, dpr);
@@ -194,7 +215,7 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     const side = GameScreenView.SAFE_SIDE;
 
     this._levelLabel.x = width / 2;
-    this._levelLabel.y = top + 8;
+    this._levelLabel.y = top + (this._config?.levelLabelTop ?? 8);
 
     if (this._restartBtn) {
       this._restartBtn.x = width - side - 40;
@@ -202,6 +223,10 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     }
 
     this.storeSize(width, height);
+    this.drawBackground(width, height);
+    // Keep the board clear of the top HUD (level label + restart button) and the
+    // bottom safe area, so a tall board never slides under the level label.
+    this._board?.setInsets(GameScreenView.BOARD_TOP_RESERVE, GameScreenView.BOARD_BOTTOM_RESERVE);
     this._board?.setViewSize(width, height);
     if (this._completeOverlay.visible) this.layoutComplete();
   }
@@ -224,12 +249,36 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   public shakeArrow(arrowId: number): void {
     this._board?.shakeArrow(arrowId);
   }
+  public nudgeArrow(block: ArrowState, adv: number, obstacleId: number, onDone: () => void): void {
+    if (this._board) this._board.nudgeArrow(block, adv, obstacleId, onDone);
+    else onDone();
+  }
 
   private _w = 390;
   private _h = 844;
   private storeSize(width: number, height: number): void {
     this._w = width;
     this._h = height;
+  }
+
+  /** Full-screen vertical warm gradient behind everything. */
+  private drawBackground(width: number, height: number): void {
+    const cfg = this._config ?? new ArrowGameConfig();
+    // Normalized LOCAL space (0..1 over the shape) so the vertical blend is
+    // size-independent — pixel coords here map to texture space and collapse the
+    // gradient to a single flat color.
+    const grad = new PIXI.FillGradient({
+      type: "linear",
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 1 },
+      textureSpace: "local",
+      colorStops: [
+        { offset: 0, color: cfg.bgGradientTop },
+        { offset: 1, color: cfg.bgGradientBottom },
+      ],
+    });
+    this._bg.clear();
+    this._bg.rect(0, 0, width, height).fill(grad);
   }
 
   private layoutComplete(): void {

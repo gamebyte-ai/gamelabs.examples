@@ -6,6 +6,7 @@ import { GameState } from "../utilities/GameState";
 import { LEVELS } from "../utilities/LevelData";
 import { findUnsolvableLevels } from "../utilities/LevelSolver";
 import { ArrowGameAssetIds } from "../ArrowGameAssetIds";
+import { ArrowGameConfig } from "../ArrowGameConfig";
 
 /**
  * Coordinates the single 2D game view (HUD + board), the puzzle state, and audio.
@@ -15,12 +16,14 @@ import { ArrowGameAssetIds } from "../ArrowGameAssetIds";
 export class GameScreenViewController implements IViewController<IGameScreenView> {
   private _view: IGameScreenView | null = null;
   private _audio: AudioService | null = null;
+  private _config: ArrowGameConfig | null = null;
   private readonly _state = new GameState();
   private readonly _subs = new UnsubscribeBag();
   private _busy = false;
 
   public inject(resolver: IInstanceResolver): void {
     this._audio = resolver.getInstance(AudioService);
+    this._config = resolver.getInstance(ArrowGameConfig);
     // Oyun sesleri KAPALI (SFX + müzik). Tek noktadan global mute — çalma
     // çağrıları yerinde kalıyor, sadece susuyor. Geri açmak için `true` → `false`.
     this._audio?.setMasterMute(true);
@@ -43,7 +46,11 @@ export class GameScreenViewController implements IViewController<IGameScreenView
     // Start background music (looped).
     this._audio?.playMusic(ArrowGameAssetIds.BgmGameplay, { loop: true, volume: 0.5 });
 
-    this.loadLevel(0);
+    // TEST/DEBUG: boot into the configured start level (1-based in config,
+    // clamped to a valid 0-based index). Change `startLevel` to test any level.
+    const start = (this._config?.startLevel ?? 1) - 1;
+    const startIndex = Math.min(Math.max(start, 0), LEVELS.length - 1);
+    this.loadLevel(startIndex);
   }
 
   private loadLevel(index: number): void {
@@ -68,13 +75,26 @@ export class GameScreenViewController implements IViewController<IGameScreenView
       const block = this._state.getArrow(arrowId);
       if (!block) return;
       this._audio?.playSfx(ArrowGameAssetIds.SfxSlide);
+      // It has a clear lane → it WILL leave the board. Mark it gone in the state
+      // NOW (not when the animation ends) so it immediately stops counting as an
+      // obstacle for any arrow tapped while its slide-out is still playing.
+      const remaining = this._state.removeArrow(arrowId);
       this._view?.slideArrowOut(block, () => {
-        const remaining = this._state.removeArrow(arrowId);
         if (remaining === 0) this.onLevelComplete();
       });
     } else {
       this._audio?.playSfx(ArrowGameAssetIds.SfxBlocked);
-      this._view?.shakeArrow(arrowId);
+      // Blocked: lunge forward into the obstacle and flash red on return. Works
+      // for both a multi-cell gap AND an adjacent obstacle (adv=0 → partial bump
+      // into the obstacle cell). Plain shake only if there is no obstacle.
+      const block = this._state.getArrow(arrowId);
+      const obstacleId = this._state.blockedObstacleId(arrowId);
+      if (block && obstacleId >= 0) {
+        const adv = this._state.blockedAdvance(arrowId);
+        this._view?.nudgeArrow(block, adv, obstacleId, () => {});
+      } else {
+        this._view?.shakeArrow(arrowId);
+      }
     }
   }
 

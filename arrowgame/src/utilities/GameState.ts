@@ -97,6 +97,54 @@ export class GameState implements IGameState {
     return true;
   }
 
+  /**
+   * How many EMPTY cells the head can advance before hitting an obstacle, when
+   * the arrow is blocked (canSlide === false). 0 = obstacle is adjacent (no gap).
+   * Used for the "nudge into the gap, flash red, return" feedback.
+   */
+  public blockedAdvance(id: number): number {
+    const arrow = this.getArrow(id);
+    if (!arrow || arrow.removed) return 0;
+
+    const head = arrow.cells[0];
+    const delta = DIRECTION_DELTA[arrow.direction];
+    let col = head.col + delta.col;
+    let row = head.row + delta.row;
+    let free = 0;
+
+    while (col >= 0 && col < this._cols && row >= 0 && row < this._rows) {
+      if (this.isOccupied(col, row, id)) return free; // hit the obstacle
+      free++;
+      col += delta.col;
+      row += delta.row;
+    }
+    return free; // reached the edge with no obstacle (would be a valid slide)
+  }
+
+  /**
+   * Id of the FIRST arrow blocking this arrow's head ray (the obstacle it would
+   * hit), or -1 if none. Used to make the obstacle react (shake + red blink).
+   */
+  public blockedObstacleId(id: number): number {
+    const arrow = this.getArrow(id);
+    if (!arrow || arrow.removed) return -1;
+
+    const head = arrow.cells[0];
+    const d = DIRECTION_DELTA[arrow.direction];
+    let col = head.col + d.col;
+    let row = head.row + d.row;
+
+    while (col >= 0 && col < this._cols && row >= 0 && row < this._rows) {
+      const hit = this._arrows.find(
+        (b) => !b.removed && b.id !== id && b.cells.some((c) => c.col === col && c.row === row),
+      );
+      if (hit) return hit.id;
+      col += d.col;
+      row += d.row;
+    }
+    return -1;
+  }
+
   /** Mark a block as removed (after its slide animation completes). Returns remaining count. */
   public removeArrow(id: number): number {
     const block = this.getArrow(id);

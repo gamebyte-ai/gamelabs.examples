@@ -15,11 +15,18 @@ const ARROW_ROT: Record<Direction, number> = {
   [Direction.Left]: -Math.PI / 2,
 };
 
+/** Flash color when an arrow nudges into an obstacle (blocked-with-gap feedback). */
+const BLOCKED_COLOR = 0xff3b30;
+/** Color a tapped arrow turns while it successfully slides out (has a clear lane
+ * → "solvable"), so the outcome reads instantly: BLUE = clear, RED = blocked. */
+const CLEAR_COLOR = 0x2f80ff;
+
 /** Per-block visuals: a container holding the rope stroke + its arrowhead. */
 interface ArrowView {
   container: PIXI.Container;
   rope: PIXI.Graphics;
-  arrow: PIXI.Sprite;
+  /** Arrowhead drawn as a solid triangle (same color as the rope body). */
+  arrow: PIXI.Graphics;
   cells: { col: number; row: number }[];
   direction: Direction;
   color: number;
@@ -35,7 +42,6 @@ interface ArrowView {
  */
 export class Board2D extends PIXI.Container {
   private readonly _cfg: ArrowGameConfig;
-  private readonly _arrowTex: PIXI.Texture | null;
 
   private readonly _grid = new PIXI.Graphics();
   private readonly _arrowLayer = new PIXI.Container();
@@ -48,13 +54,16 @@ export class Board2D extends PIXI.Container {
   private _cellPx = 40;
   private _originX = 0; // top-left of the board in screen px
   private _originY = 0;
+  // Reserved screen bands the board must NOT overlap (HUD label/buttons on top,
+  // home-indicator on the bottom). The board fits & centers BETWEEN them.
+  private _insetTop = 0;
+  private _insetBottom = 0;
 
   private _tapCb: ((arrowId: number) => void) | null = null;
 
-  public constructor(cfg: ArrowGameConfig, arrowTex: PIXI.Texture | null) {
+  public constructor(cfg: ArrowGameConfig) {
     super();
     this._cfg = cfg;
-    this._arrowTex = arrowTex;
 
     this.addChild(this._grid);
     this.addChild(this._arrowLayer);
@@ -71,6 +80,13 @@ export class Board2D extends PIXI.Container {
   public setViewSize(w: number, h: number): void {
     this._viewW = w;
     this._viewH = h;
+    if (this._cols > 0) this.relayout();
+  }
+
+  /** Reserve top/bottom screen bands (HUD, safe areas) that the board avoids. */
+  public setInsets(top: number, bottom: number): void {
+    this._insetTop = top;
+    this._insetBottom = bottom;
     if (this._cols > 0) this.relayout();
   }
 
@@ -97,19 +113,14 @@ export class Board2D extends PIXI.Container {
   }
 
   private addArrow(block: ArrowState): void {
-    const color = this._cfg.arrowColors[block.colorIndex % this._cfg.arrowColors.length];
+    const color = this._cfg.arrowColor; // all arrows white (see config)
     const container = new PIXI.Container();
     const rope = new PIXI.Graphics();
     container.addChild(rope);
 
-    const arrow = new PIXI.Sprite(this._arrowTex ?? PIXI.Texture.EMPTY);
-    arrow.anchor.set(0.5);
-    const aSize = this._cellPx * this._cfg.arrowSizeRatio;
-    arrow.width = aSize;
-    arrow.height = aSize;
-    arrow.rotation = ARROW_ROT[block.direction];
-    // Tint arrowhead to the rope color so heads read as part of the piece.
-    arrow.tint = color;
+    // Arrowhead is a solid Graphics triangle (drawn in drawRope), so it shares the
+    // exact rope color instead of a tinted PNG that never quite matches.
+    const arrow = new PIXI.Graphics();
     container.addChild(arrow);
 
     this._arrowLayer.addChild(container);
@@ -130,20 +141,53 @@ export class Board2D extends PIXI.Container {
   }
 
   /** Draw a rope as a thick round-capped polyline through the given screen points,
-   * and place its arrowhead at the head (points[0]). */
-  private drawRope(bv: ArrowView, points: { x: number; y: number }[]): void {
+   * and place its arrowhead at the head (points[0]). `color` overrides the arrow's
+   * own color (used to flash red when nudged into an obstacle). */
+  private drawRope(bv: ArrowView, points: { x: number; y: number }[], color: number = bv.color): void {
     const g = bv.rope;
     g.clear();
     if (points.length === 0) return;
     const width = this._cellPx * this._cfg.arrowThicknessRatio;
+
+    // Push the head AHEAD of the leading cell center, toward the travel direction,
+    // so the arrow reads as pointing forward. EXCEPTION: if the head cell already
+    // sits on the board edge it points toward, the offset would poke outside the
+    // grid — keep it dead-center on the cell instead.
+    const d = DIRECTION_DELTA[bv.direction];
+    const head = bv.cells[0];
+    const onEdge =
+      head === undefined ||
+      head.col + d.col < 0 ||
+      head.col + d.col >= this._cols ||
+      head.row + d.row < 0 ||
+      head.row + d.row >= this._rows;
+    const off = onEdge ? 0 : this._cellPx * this._cfg.arrowHeadOffsetRatio;
+    const hx = points[0].x + d.col * off;
+    const hy = points[0].y + d.row * off;
+
     if (points.length === 1) {
-      g.circle(points[0].x, points[0].y, width / 2).fill({ color: bv.color });
+      g.circle(points[0].x, points[0].y, width / 2).fill({ color });
     } else {
-      g.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) g.lineTo(points[i].x, points[i].y);
-      g.stroke({ width, color: bv.color, cap: "round", join: "round" });
+      // Start the stroke at the pushed-out head so the body EXTENDS up to the
+      // arrowhead — the last cell joins the forward head with no gap.
+      g.moveTo(hx, hy);
+      for (let i = 0; i < points.length; i++) g.lineTo(points[i].x, points[i].y);
+      g.stroke({ width, color, cap: "round", join: "round" });
     }
-    bv.arrow.position.set(points[0].x, points[0].y);
+
+    // Redraw the head as a SOLID triangle in the exact body color (pointing up in
+    // local space, then rotated to the travel direction) → head and body are one
+    // uniform piece, no tinted-texture mismatch.
+    const a = this._cellPx * this._cfg.arrowSizeRatio;
+    bv.arrow.clear();
+    bv.arrow
+      .moveTo(0, -a * 0.55)
+      .lineTo(a * 0.5, a * 0.35)
+      .lineTo(-a * 0.5, a * 0.35)
+      .closePath()
+      .fill({ color });
+    bv.arrow.position.set(hx, hy);
+    bv.arrow.rotation = ARROW_ROT[bv.direction];
   }
 
   // ── Interaction ──────────────────────────────────────────────────────────
@@ -222,7 +266,8 @@ export class Board2D extends PIXI.Container {
         const headArc = tailArc + bodyLen;
         // Window head → tail (so arrow sits at points[0] = head end).
         const pts = this.subPathHeadToTail(path, arc, tailArc, headArc);
-        this.drawRope(bv, pts);
+        // BLUE while sliding → signals the tap resolved (clear lane / solvable).
+        this.drawRope(bv, pts, CLEAR_COLOR);
       },
       onComplete: () => {
         this._arrows.delete(block.id);
@@ -264,29 +309,160 @@ export class Board2D extends PIXI.Container {
 
   public shakeArrow(arrowId: number): void {
     const bv = this._arrows.get(arrowId);
-    if (!bv) return;
-    const amp = this._cellPx * 0.12;
+    if (bv) this.shakeView(bv);
+  }
+
+  /** Shake a single arrow view (intensity = config shakeAmplitudeRatio). Calls
+   * `onDone` when the shake finishes. */
+  private shakeView(bv: ArrowView, onDone?: () => void): void {
+    const amp = this._cellPx * this._cfg.shakeAmplitudeRatio;
     gsap.killTweensOf(bv.container);
     bv.container.x = 0;
     gsap.fromTo(
       bv.container,
       { x: -amp },
-      { x: amp, duration: this._cfg.shakeDuration / 4, ease: "power1.inOut", repeat: 3, yoyo: true,
-        onComplete: () => { bv.container.x = 0; } },
+      {
+        x: amp,
+        duration: this._cfg.shakeDuration / 4,
+        ease: "power1.inOut",
+        repeat: 3,
+        yoyo: true,
+        onComplete: () => {
+          bv.container.x = 0;
+          onDone?.();
+        },
+      },
     );
+  }
+
+  /** Impact reaction on the OBSTACLE arrow that got hit: stays RED for the whole
+   * shake, then returns to its normal color. */
+  private impactReact(obstacleId: number): void {
+    const bv = this._arrows.get(obstacleId);
+    if (!bv || bv.sliding) return;
+    const rest = (): { x: number; y: number }[] => bv.cells.map((c) => this.cellCenter(c.col, c.row));
+    this.drawRope(bv, rest(), BLOCKED_COLOR); // red while shaking
+    this.shakeView(bv, () => {
+      if (!bv.sliding) this.drawRope(bv, rest()); // restore color when the shake ends
+    });
+  }
+
+  /**
+   * BLOCKED-WITH-GAP feedback: the arrow slides forward `adv` empty cells until it
+   * hits the obstacle (constant-length window, same as a real slide), flashes RED
+   * at the contact point, then slides back to its original place. State unchanged.
+   */
+  public nudgeArrow(block: ArrowState, adv: number, obstacleId: number, onDone: () => void): void {
+    const bv = this._arrows.get(block.id);
+    if (!bv) {
+      onDone();
+      return;
+    }
+    bv.sliding = true;
+
+    const head = block.cells[0];
+    const delta = DIRECTION_DELTA[block.direction];
+    const n = block.cells.length;
+
+    // Path TAIL → HEAD → forward `adv` cells (up to just before the obstacle).
+    const pathCells: { col: number; row: number }[] = [];
+    for (let i = n - 1; i >= 0; i--) pathCells.push(block.cells[i]);
+    for (let j = 1; j <= adv; j++) pathCells.push({ col: head.col + delta.col * j, row: head.row + delta.row * j });
+    const path = pathCells.map((c) => this.cellCenter(c.col, c.row));
+
+    // Adjacent obstacle (adv=0): there's no empty cell to cross, so append a
+    // PARTIAL point a fraction of a cell toward the obstacle cell's center — the
+    // arrow lunges into the wall and bounces back instead of just shaking.
+    if (adv === 0) {
+      const hc = this.cellCenter(head.col, head.row);
+      const bump = this._cellPx * this._cfg.bumpDistanceRatio;
+      path.push({ x: hc.x + delta.col * bump, y: hc.y + delta.row * bump });
+    }
+
+    const arc: number[] = [0];
+    for (let i = 1; i < path.length; i++) {
+      arc.push(arc[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y));
+    }
+    const bodyLen = arc[n - 1];
+    const advDist = arc[arc.length - 1] - bodyLen; // adv*cellPx, or the bump distance
+    if (advDist <= 0) {
+      // Nothing to travel (bump disabled) → fall back to a plain shake.
+      bv.sliding = false;
+      this.shakeView(bv);
+      this.impactReact(obstacleId);
+      onDone();
+      return;
+    }
+
+    let red = false;
+    const render = (tailArc: number): void => {
+      const pts = this.subPathHeadToTail(path, arc, tailArc, tailArc + bodyLen);
+      this.drawRope(bv, pts, red ? BLOCKED_COLOR : bv.color);
+    };
+
+    const driver = { t: 0 };
+    gsap.killTweensOf(driver);
+    // Same per-cell rate AND easing as the normal slide (power1.in) → advance
+    // speed matches a real move. The adjacent bump uses its own short duration.
+    const dur =
+      adv > 0 ? adv / this._cfg.slideSpeed : Math.max(0.09, this._cfg.bumpDistanceRatio / this._cfg.slideSpeed);
+    gsap.to(driver, {
+      t: advDist,
+      duration: dur,
+      ease: "power1.in",
+      onUpdate: () => render(driver.t),
+      onComplete: () => {
+        red = true; // hit the wall → turn RED and stay red while returning
+        render(advDist);
+        this.impactReact(obstacleId); // the arrow it hit shakes + red-blinks
+        gsap.to(driver, {
+          t: 0,
+          duration: dur,
+          ease: "power1.out",
+          delay: 0.08,
+          onUpdate: () => render(driver.t),
+          onComplete: () => {
+            red = false;
+            this.drawRope(bv, bv.cells.map((c) => this.cellCenter(c.col, c.row))); // rest, original color
+            bv.sliding = false;
+            onDone();
+          },
+        });
+      },
+    });
   }
 
   // ── Layout ────────────────────────────────────────────────────────────────
 
   private computeLayout(): void {
     const fit = this._cfg.boardFitRatio;
-    const availW = this._viewW * fit;
-    const availH = this._viewH * fit;
-    this._cellPx = Math.max(8, Math.floor(Math.min(availW / this._cols, availH / this._rows)));
+    // ROTATION-INVARIANT sizing: base the cell size on the SHORT and LONG screen
+    // sides (min/max of w,h). These don't change when the device rotates, so the
+    // board is the SAME size in portrait and landscape — it just re-centers. It
+    // never shrinks going wide, and a tall board keeps its size in landscape (it
+    // may extend past the short height, just like fixed-size text).
+    const shortSide = Math.min(this._viewW, this._viewH);
+    const longSide = Math.max(this._viewW, this._viewH);
+    this._cellPx = Math.max(
+      8,
+      Math.floor(Math.min((shortSide * fit) / this._cols, (longSide * fit) / this._rows)),
+    );
     const boardW = this._cellPx * this._cols;
     const boardH = this._cellPx * this._rows;
     this._originX = (this._viewW - boardW) / 2;
-    this._originY = (this._viewH - boardH) / 2;
+
+    // Vertical placement: drop below the top HUD when there's spare space; if the
+    // board nearly fills the height (tight landscape), keep it on-screen instead
+    // of shrinking it. `freeV` = leftover vertical space.
+    const freeV = this._viewH - boardH;
+    if (freeV <= 0) {
+      this._originY = freeV / 2; // taller than the screen → symmetric center
+    } else {
+      const maxTop = Math.max(0, freeV - this._insetBottom); // keep bottom safe area if we can
+      // Base placement below the HUD, plus a tunable nudge, clamped on-screen.
+      const base = Math.min(this._insetTop, maxTop) + this._cfg.boardYOffset;
+      this._originY = Math.min(Math.max(base, 0), freeV);
+    }
     // Tap hit area covers the whole board.
     this.hitArea = new PIXI.Rectangle(this._originX, this._originY, boardW, boardH);
   }
@@ -316,11 +492,11 @@ export class Board2D extends PIXI.Container {
   private relayout(): void {
     this.computeLayout();
     this.drawGrid();
-    const aSize = this._cellPx * this._cfg.arrowSizeRatio;
     for (const bv of this._arrows.values()) {
       if (bv.sliding) continue; // mid-animation arrows redraw themselves
-      bv.arrow.width = aSize;
-      bv.arrow.height = aSize;
+      // drawRope fully redraws the rope + the head triangle at the current cell
+      // size — no manual scaling (setting width/height on the Graphics head would
+      // apply a compounding scale and shrink it away on repeated resizes).
       this.drawRope(bv, bv.cells.map((c) => this.cellCenter(c.col, c.row)));
     }
   }

@@ -25,6 +25,9 @@ export interface IGameScreenView extends IScreenView {
   onArrowTapped(cb: (arrowId: number) => void): void;
   /** Animate a block sliding out (snake), then invoke onDone. */
   slideArrowOut(block: ArrowState, onDone: () => void): void;
-  /** Play a short shake on a blocked block. */
+  /** Play a short shake on a blocked arrow (obstacle adjacent, no gap). */
   shakeArrow(arrowId: number): void;
+  /** Blocked-with-gap feedback: nudge forward `adv` cells, flash red, return; the
+   * hit arrow (obstacleId) shakes + red-blinks on impact. */
+  nudgeArrow(block: ArrowState, adv: number, obstacleId: number, onDone: () => void): void;
 }

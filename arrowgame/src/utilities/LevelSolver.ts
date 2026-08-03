@@ -96,6 +96,33 @@ export function findUnsolvableLevels(levels: readonly LevelDef[]): {
           }
         }
       }
+
+      // Edge-flush rule: if the head AND its adjacent body cell both lie on the
+      // very board edge the arrow points toward, the whole first segment is flush
+      // with that border and can't leave it cleanly (degenerate slide — see the
+      // "arrow hugging the top row" bug). Reject such placements.
+      const head = b.cells[0];
+      const next = b.cells[1];
+      const d = DIRECTION_DELTA[b.direction];
+      if (d.row !== 0) {
+        const edgeRow = d.row < 0 ? 0 : level.rows - 1;
+        if (head.row === edgeRow && next.row === edgeRow) {
+          problems.push({
+            index,
+            reason: `head flush with the ${d.row < 0 ? "top" : "bottom"} edge it points toward at (${head.col},${head.row})`,
+          });
+          return;
+        }
+      } else {
+        const edgeCol = d.col < 0 ? 0 : level.cols - 1;
+        if (head.col === edgeCol && next.col === edgeCol) {
+          problems.push({
+            index,
+            reason: `head flush with the ${d.col < 0 ? "left" : "right"} edge it points toward at (${head.col},${head.row})`,
+          });
+          return;
+        }
+      }
     }
     if (!isLevelSolvable(level)) {
       problems.push({ index, reason: "deadlock — no sequence clears the board" });
