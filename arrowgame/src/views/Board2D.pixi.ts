@@ -59,9 +59,20 @@ export class Board2D extends PIXI.Container {
   private _insetTop = 0;
   private _insetBottom = 0;
   // Top-left of the letterboxed play rect in screen px (0,0 when no letterbox).
-  // The board sizes/centers WITHIN the play rect, not the raw viewport.
+  // The board CENTERS within the play rect, but its cell SIZE comes from the raw
+  // viewport (below), so the grid stays the same size across orientations.
   private _playOriginX = 0;
   private _playOriginY = 0;
+  // Raw viewport size (not the play rect) — used for rotation-invariant sizing.
+  private _rawW = 0;
+  private _rawH = 0;
+  // Visible screen edges expressed in BOARD-LOCAL px — an arrow slides until its
+  // head passes these before being removed, so it exits the actual screen (not the
+  // board/design edge). Set from the real viewport via setExitBounds.
+  private _exitLeft = -1e5;
+  private _exitTop = -1e5;
+  private _exitRight = 1e5;
+  private _exitBottom = 1e5;
 
   private _tapCb: ((arrowId: number) => void) | null = null;
 
@@ -81,20 +92,26 @@ export class Board2D extends PIXI.Container {
     this._tapCb = cb;
   }
 
-  public setViewSize(w: number, h: number): void {
-    this._viewW = w;
-    this._viewH = h;
-    if (this._cols > 0) this.relayout();
-  }
-
-  /** Confine the board to a letterboxed play rect (its origin + size). Everything
-   * is sized/centered inside this rect; the letterbox bars mask the rest. */
-  public setPlayRect(x: number, y: number, w: number, h: number): void {
+  /** Position the board inside a letterboxed play rect while keeping its cell size
+   * tied to the RAW viewport (rotation-invariant → stable across orientations).
+   * `rawW/rawH` = full screen; `x,y,w,h` = the play rect it centers within. */
+  public setViewport(rawW: number, rawH: number, x: number, y: number, w: number, h: number): void {
+    this._rawW = rawW;
+    this._rawH = rawH;
     this._playOriginX = x;
     this._playOriginY = y;
     this._viewW = w;
     this._viewH = h;
     if (this._cols > 0) this.relayout();
+  }
+
+  /** Visible screen edges in BOARD-LOCAL px (an arrow slides until its head passes
+   * these, so it leaves the real screen — not just the board/design edge). */
+  public setExitBounds(left: number, top: number, right: number, bottom: number): void {
+    this._exitLeft = left;
+    this._exitTop = top;
+    this._exitRight = right;
+    this._exitBottom = bottom;
   }
 
   /** Reserve top/bottom screen bands (HUD, safe areas) that the board avoids. */
@@ -235,17 +252,28 @@ export class Board2D extends PIXI.Container {
     const delta = DIRECTION_DELTA[block.direction];
     const n = block.cells.length;
 
-    // Steps for the head to reach just off the board edge (arrow-direction exit).
+    // Steps for the HEAD to travel off the VISIBLE viewport (the design/play area),
+    // not merely off the board — so when the board is centered on a wide screen the
+    // arrow still slides all the way out of view before it's removed (no popping out
+    // mid-screen at the board edge).
+    const startX = this.cellCenter(head.col, head.row).x;
+    const startY = this.cellCenter(head.col, head.row).y;
+    const stepX = delta.col * this._cellPx;
+    const stepY = delta.row * this._cellPx;
+    const leftB = this._exitLeft;
+    const rightB = this._exitRight;
+    const topB = this._exitTop;
+    const botB = this._exitBottom;
     let k = 0;
-    let cc = head.col;
-    let rr = head.row;
-    while (cc >= 0 && cc < this._cols && rr >= 0 && rr < this._rows) {
-      cc += delta.col;
-      rr += delta.row;
+    let ex = startX;
+    let ey = startY;
+    while (k < 400 && ex >= leftB && ex <= rightB && ey >= topB && ey <= botB) {
+      ex += stepX;
+      ey += stepY;
       k++;
     }
-    // Exit ray long enough for the WHOLE rope (length = bodyLen) to slide fully
-    // off the board: tail must travel past the edge → exitCells ≥ (n-1)+k, + margin.
+    // Exit ray long enough for the WHOLE rope (length = bodyLen) to also clear the
+    // edge: tail must travel past it → exitCells ≥ (n-1)+k, + margin.
     const exitCells = n + k + 1;
 
     // Screen-space polyline TAIL → HEAD → out (exit ray). The rope is a CONSTANT-
@@ -450,16 +478,16 @@ export class Board2D extends PIXI.Container {
 
   private computeLayout(): void {
     const fit = this._cfg.boardFitRatio;
-    // CONTAIN-FIT to the actual viewport: size cells so the whole grid fits within
-    // the available width AND the available height (viewport minus the reserved
-    // top/bottom HUD + safe-area bands). Keeps the board fully on-screen in EVERY
-    // orientation — in landscape (short height) it shrinks to fit instead of
-    // overflowing past the bottom. Tune the margin via `boardFitRatio`.
-    const availW = this._viewW;
-    const availH = Math.max(1, this._viewH - this._insetTop - this._insetBottom);
+    // ROTATION-INVARIANT sizing: derive the cell size from the RAW viewport's SHORT
+    // and LONG sides (min/max of w,h). These don't change when the device rotates,
+    // so the grid keeps the SAME size in portrait and landscape — it never shrinks
+    // as the screen widens. The letterbox frames any excess; a very tall board may
+    // extend past a short landscape height (clipped), the cost of a fixed size.
+    const shortSide = Math.min(this._rawW, this._rawH);
+    const longSide = Math.max(this._rawW, this._rawH);
     this._cellPx = Math.max(
       8,
-      Math.floor(Math.min((availW * fit) / this._cols, (availH * fit) / this._rows)),
+      Math.floor(Math.min((shortSide * fit) / this._cols, (longSide * fit) / this._rows)),
     );
     const boardW = this._cellPx * this._cols;
     const boardH = this._cellPx * this._rows;

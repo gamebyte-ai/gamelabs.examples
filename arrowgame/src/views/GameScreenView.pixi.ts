@@ -52,6 +52,10 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   private _config: ArrowGameConfig | null = null;
   private _board: Board2D | null = null;
   private readonly _bg = new PIXI.Graphics();
+  // All gameplay + HUD live in this container, laid out at a FIXED design size
+  // (DESIGN_W × DESIGN_H). onResize scales the whole container uniformly to fit
+  // the play rect, so the board AND the UI scale together like one canvas.
+  private readonly _content = new PIXI.Container();
   private readonly _letterbox = new PIXI.Graphics();
   // Current letterboxed play rect (screen px). Defaults to the full view.
   private _playX = 0;
@@ -70,18 +74,25 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     // Warm gradient backdrop — added FIRST so everything draws on top of it.
     this.addChild(this._bg);
 
+    // Scaled content layer (design-space). Board + HUD go INSIDE it.
+    this.addChild(this._content);
+
     // 2D board (dot grid + rope arrows) — behind the HUD, above the background.
     this._board = new Board2D(this._config ?? new ArrowGameConfig());
-    this.addChild(this._board);
+    this._content.addChild(this._board);
 
     this._levelLabel.anchor.set(0.5, 0);
     if (this._config) {
       this._levelLabel.style = levelLabelStyle(this._config.levelLabelSize, this._config.levelLabelColor);
     }
-    this.addChild(this._levelLabel);
+    this._content.addChild(this._levelLabel);
 
     this._restartBtn = this.buildIconButton(ArrowGameAssetIds.BtnRestart, 64, () => this._restartCb?.());
-    this.addChild(this._restartBtn);
+    this._content.addChild(this._restartBtn);
+
+    // Fixed design-space layout of the board + HUD (positions never change; the
+    // whole _content container is scaled in onResize).
+    this.layoutContent();
 
     this.buildCompleteOverlay();
     this.addChild(this._completeOverlay);
@@ -91,6 +102,28 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     // spills outside the aspect-clamped play rect. Non-interactive.
     this._letterbox.eventMode = "none";
     this.addChild(this._letterbox);
+  }
+
+  /** Fixed positions in DESIGN space (DESIGN_W × DESIGN_H). Called once; the whole
+   * _content layer is uniformly scaled to the play rect in onResize. */
+  private layoutContent(): void {
+    const top = GameScreenView.SAFE_TOP;
+    const side = GameScreenView.SAFE_SIDE;
+    this._board?.setInsets(GameScreenView.BOARD_TOP_RESERVE, GameScreenView.BOARD_BOTTOM_RESERVE);
+    this._board?.setViewport(
+      GameScreenView.DESIGN_W,
+      GameScreenView.DESIGN_H,
+      0,
+      0,
+      GameScreenView.DESIGN_W,
+      GameScreenView.DESIGN_H,
+    );
+    this._levelLabel.x = GameScreenView.DESIGN_W / 2;
+    this._levelLabel.y = top + (this._config?.levelLabelTop ?? 8);
+    if (this._restartBtn) {
+      this._restartBtn.x = GameScreenView.DESIGN_W - side - 40;
+      this._restartBtn.y = top + 40;
+    }
   }
 
   /** Aspect-clamped play rect: the largest centered rect within [minAspect,
@@ -248,6 +281,12 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     this._completeOverlay.visible = false;
   }
 
+  // Fixed DESIGN resolution. All content is authored at this size and the whole
+  // _content layer is uniformly scaled to fit the play rect — so board + UI scale
+  // together. At exactly this size the scale is 1 (content renders 1:1).
+  private static readonly DESIGN_W = 390;
+  private static readonly DESIGN_H = 844;
+
   // Fixed safe-area padding (iPhone notch / Dynamic Island) — v4.0.0 has no
   // safeAreaInsets getter on HudViewBase, so use conservative constants.
   private static readonly SAFE_TOP = 59;
@@ -260,35 +299,44 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
 
   public override onResize(width: number, height: number, dpr: number): void {
     super.onResize(width, height, dpr);
-    const top = GameScreenView.SAFE_TOP;
-    const side = GameScreenView.SAFE_SIDE;
 
     this.storeSize(width, height);
     this.computePlayRect(width, height);
-    // Everything positions RELATIVE to the letterboxed play rect.
-    const px = this._playX;
-    const py = this._playY;
-
-    this._levelLabel.x = px + this._playW / 2;
-    this._levelLabel.y = py + top + (this._config?.levelLabelTop ?? 8);
-
-    if (this._restartBtn) {
-      this._restartBtn.x = px + this._playW - side - 40;
-      this._restartBtn.y = py + top + 40;
-    }
-
     this.drawBackground(width, height);
-    // Keep the board clear of the top HUD (level label + restart button) and the
-    // bottom safe area, so a tall board never slides under the level label.
-    this._board?.setInsets(GameScreenView.BOARD_TOP_RESERVE, GameScreenView.BOARD_BOTTOM_RESERVE);
-    this._board?.setPlayRect(px, py, this._playW, this._playH);
+
+    // Uniformly scale the whole design-space content to CONTAIN-FIT the play rect,
+    // then center it. Board + UI scale together; outside the letterbox range the
+    // play rect shrinks so everything scales down with it.
+    const scale = Math.min(this._playW / GameScreenView.DESIGN_W, this._playH / GameScreenView.DESIGN_H);
+    this._content.scale.set(scale);
+    this._content.x = this._playX + (this._playW - GameScreenView.DESIGN_W * scale) / 2;
+    this._content.y = this._playY + (this._playH - GameScreenView.DESIGN_H * scale) / 2;
+
+    // Tell the board where the real screen edges are (in its own local px) so an
+    // arrow slides fully off the SCREEN before it's removed — using the actual
+    // width/height, not the fixed design canvas.
+    const s = scale || 1;
+    this._board?.setExitBounds(
+      (0 - this._content.x) / s,
+      (0 - this._content.y) / s,
+      (width - this._content.x) / s,
+      (height - this._content.y) / s,
+    );
+
     this.drawLetterbox(width, height);
     if (this._completeOverlay.visible) this.layoutComplete();
   }
 
   // --- 2D board (delegated to Board2D) ---
   public buildLevel(level: LevelDef, arrows: readonly ArrowState[]): void {
-    this._board?.setPlayRect(this._playX, this._playY, this._playW, this._playH);
+    this._board?.setViewport(
+      GameScreenView.DESIGN_W,
+      GameScreenView.DESIGN_H,
+      0,
+      0,
+      GameScreenView.DESIGN_W,
+      GameScreenView.DESIGN_H,
+    );
     this._board?.buildLevel(level, arrows);
   }
   public clearLevel(): void {
