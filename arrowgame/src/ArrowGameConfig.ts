@@ -18,7 +18,7 @@ export class ArrowGameConfig {
    * Set to 1 to always start at Level 1; bump it to test a specific level.
    * Clamped to the valid range at load time. */
   /** @panel {"type":"number","label":"Start Level (test)","min":1,"max":99,"step":1,"group":"Debug","default":2} */
-  public readonly startLevel = 1;
+  public readonly startLevel = 3;
 
   /** How fast an arrow slides out (grid cells per second). */
   /** @panel {"type":"number","label":"Slide speed","min":4,"max":30,"step":1,"group":"Feel","default":14} */
@@ -76,6 +76,16 @@ export class ArrowGameConfig {
    * stays fully on screen when it fits. */
   /** @panel {"type":"number","label":"Board Y Offset","min":-300,"max":300,"step":4,"group":"Look","default":0} */
   public readonly boardYOffset = 90;
+
+  // --- Letterbox: clamp the visible play area to an aspect range (width ÷ height).
+  // Screens NARROWER than min (taller) get top/bottom bars; screens WIDER than max
+  // get left/right bars. Inside the range the play area fills the screen.
+  /** @panel {"type":"number","label":"Letterbox Min Aspect","min":0.3,"max":1.2,"step":0.01,"group":"Layout","default":0.45} */
+  public readonly letterboxMinAspect = 0.39;
+  /** @panel {"type":"number","label":"Letterbox Max Aspect","min":0.6,"max":3,"step":0.01,"group":"Layout","default":1.8} */
+  public readonly letterboxMaxAspect = 2.57;
+  /** @panel {"type":"color","label":"Letterbox Color","group":"Layout","default":"#000000"} */
+  public readonly letterboxColor = 0x000000;
 
   public readonly transitions: {
     gameScreenEnter: ScreenTransition;

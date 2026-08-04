@@ -58,6 +58,10 @@ export class Board2D extends PIXI.Container {
   // home-indicator on the bottom). The board fits & centers BETWEEN them.
   private _insetTop = 0;
   private _insetBottom = 0;
+  // Top-left of the letterboxed play rect in screen px (0,0 when no letterbox).
+  // The board sizes/centers WITHIN the play rect, not the raw viewport.
+  private _playOriginX = 0;
+  private _playOriginY = 0;
 
   private _tapCb: ((arrowId: number) => void) | null = null;
 
@@ -78,6 +82,16 @@ export class Board2D extends PIXI.Container {
   }
 
   public setViewSize(w: number, h: number): void {
+    this._viewW = w;
+    this._viewH = h;
+    if (this._cols > 0) this.relayout();
+  }
+
+  /** Confine the board to a letterboxed play rect (its origin + size). Everything
+   * is sized/centered inside this rect; the letterbox bars mask the rest. */
+  public setPlayRect(x: number, y: number, w: number, h: number): void {
+    this._playOriginX = x;
+    this._playOriginY = y;
     this._viewW = w;
     this._viewH = h;
     if (this._cols > 0) this.relayout();
@@ -436,32 +450,32 @@ export class Board2D extends PIXI.Container {
 
   private computeLayout(): void {
     const fit = this._cfg.boardFitRatio;
-    // ROTATION-INVARIANT sizing: base the cell size on the SHORT and LONG screen
-    // sides (min/max of w,h). These don't change when the device rotates, so the
-    // board is the SAME size in portrait and landscape — it just re-centers. It
-    // never shrinks going wide, and a tall board keeps its size in landscape (it
-    // may extend past the short height, just like fixed-size text).
-    const shortSide = Math.min(this._viewW, this._viewH);
-    const longSide = Math.max(this._viewW, this._viewH);
+    // CONTAIN-FIT to the actual viewport: size cells so the whole grid fits within
+    // the available width AND the available height (viewport minus the reserved
+    // top/bottom HUD + safe-area bands). Keeps the board fully on-screen in EVERY
+    // orientation — in landscape (short height) it shrinks to fit instead of
+    // overflowing past the bottom. Tune the margin via `boardFitRatio`.
+    const availW = this._viewW;
+    const availH = Math.max(1, this._viewH - this._insetTop - this._insetBottom);
     this._cellPx = Math.max(
       8,
-      Math.floor(Math.min((shortSide * fit) / this._cols, (longSide * fit) / this._rows)),
+      Math.floor(Math.min((availW * fit) / this._cols, (availH * fit) / this._rows)),
     );
     const boardW = this._cellPx * this._cols;
     const boardH = this._cellPx * this._rows;
-    this._originX = (this._viewW - boardW) / 2;
+    this._originX = this._playOriginX + (this._viewW - boardW) / 2;
 
     // Vertical placement: drop below the top HUD when there's spare space; if the
     // board nearly fills the height (tight landscape), keep it on-screen instead
-    // of shrinking it. `freeV` = leftover vertical space.
+    // of shrinking it. `freeV` = leftover vertical space. (Within the play rect.)
     const freeV = this._viewH - boardH;
     if (freeV <= 0) {
-      this._originY = freeV / 2; // taller than the screen → symmetric center
+      this._originY = this._playOriginY + freeV / 2; // taller than rect → center
     } else {
       const maxTop = Math.max(0, freeV - this._insetBottom); // keep bottom safe area if we can
       // Base placement below the HUD, plus a tunable nudge, clamped on-screen.
       const base = Math.min(this._insetTop, maxTop) + this._cfg.boardYOffset;
-      this._originY = Math.min(Math.max(base, 0), freeV);
+      this._originY = this._playOriginY + Math.min(Math.max(base, 0), freeV);
     }
     // Tap hit area covers the whole board.
     this.hitArea = new PIXI.Rectangle(this._originX, this._originY, boardW, boardH);

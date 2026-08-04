@@ -52,6 +52,12 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   private _config: ArrowGameConfig | null = null;
   private _board: Board2D | null = null;
   private readonly _bg = new PIXI.Graphics();
+  private readonly _letterbox = new PIXI.Graphics();
+  // Current letterboxed play rect (screen px). Defaults to the full view.
+  private _playX = 0;
+  private _playY = 0;
+  private _playW = 390;
+  private _playH = 844;
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -80,6 +86,49 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     this.buildCompleteOverlay();
     this.addChild(this._completeOverlay);
     this._completeOverlay.visible = false;
+
+    // Letterbox bars — added LAST so they mask any content (board or overlay) that
+    // spills outside the aspect-clamped play rect. Non-interactive.
+    this._letterbox.eventMode = "none";
+    this.addChild(this._letterbox);
+  }
+
+  /** Aspect-clamped play rect: the largest centered rect within [minAspect,
+   * maxAspect]. Screens taller than min or wider than max get letterbox bars. */
+  private computePlayRect(width: number, height: number): void {
+    const cfg = this._config ?? new ArrowGameConfig();
+    const aspect = width / height;
+    let pw = width;
+    let ph = height;
+    if (aspect < cfg.letterboxMinAspect) {
+      ph = width / cfg.letterboxMinAspect; // too tall → shrink height (top/bottom bars)
+    } else if (aspect > cfg.letterboxMaxAspect) {
+      pw = height * cfg.letterboxMaxAspect; // too wide → shrink width (left/right bars)
+    }
+    this._playW = pw;
+    this._playH = ph;
+    this._playX = (width - pw) / 2;
+    this._playY = (height - ph) / 2;
+  }
+
+  /** Draw the opaque bars filling the screen area outside the play rect. */
+  private drawLetterbox(width: number, height: number): void {
+    const cfg = this._config ?? new ArrowGameConfig();
+    const g = this._letterbox;
+    g.clear();
+    const x = this._playX;
+    const y = this._playY;
+    const w = this._playW;
+    const h = this._playH;
+    const color = cfg.letterboxColor;
+    if (y > 0.5) {
+      g.rect(0, 0, width, y).fill({ color });
+      g.rect(0, y + h, width, height - (y + h)).fill({ color });
+    }
+    if (x > 0.5) {
+      g.rect(0, y, x, h).fill({ color });
+      g.rect(x + w, y, width - (x + w), h).fill({ color });
+    }
   }
 
   private buildIconButton(assetId: string, size: number, onTap: () => void): PIXI.Container {
@@ -214,26 +263,32 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
     const top = GameScreenView.SAFE_TOP;
     const side = GameScreenView.SAFE_SIDE;
 
-    this._levelLabel.x = width / 2;
-    this._levelLabel.y = top + (this._config?.levelLabelTop ?? 8);
+    this.storeSize(width, height);
+    this.computePlayRect(width, height);
+    // Everything positions RELATIVE to the letterboxed play rect.
+    const px = this._playX;
+    const py = this._playY;
+
+    this._levelLabel.x = px + this._playW / 2;
+    this._levelLabel.y = py + top + (this._config?.levelLabelTop ?? 8);
 
     if (this._restartBtn) {
-      this._restartBtn.x = width - side - 40;
-      this._restartBtn.y = top + 40;
+      this._restartBtn.x = px + this._playW - side - 40;
+      this._restartBtn.y = py + top + 40;
     }
 
-    this.storeSize(width, height);
     this.drawBackground(width, height);
     // Keep the board clear of the top HUD (level label + restart button) and the
     // bottom safe area, so a tall board never slides under the level label.
     this._board?.setInsets(GameScreenView.BOARD_TOP_RESERVE, GameScreenView.BOARD_BOTTOM_RESERVE);
-    this._board?.setViewSize(width, height);
+    this._board?.setPlayRect(px, py, this._playW, this._playH);
+    this.drawLetterbox(width, height);
     if (this._completeOverlay.visible) this.layoutComplete();
   }
 
   // --- 2D board (delegated to Board2D) ---
   public buildLevel(level: LevelDef, arrows: readonly ArrowState[]): void {
-    this._board?.setViewSize(this._w, this._h);
+    this._board?.setPlayRect(this._playX, this._playY, this._playW, this._playH);
     this._board?.buildLevel(level, arrows);
   }
   public clearLevel(): void {
