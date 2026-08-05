@@ -8,12 +8,67 @@ import type { IGameBoardsView } from "./IGameBoardsView.js";
 import { GameBoardItemObject } from "./GameBoardItemObject.js";
 
 export class GameBoardsView extends GridsView implements IGameBoardsView {
+  /** Just above the cell plane so the outline is never z-fighting the backdrop. */
+  private static readonly OUTLINE_Y = 0.02;
+
   private _cellPointerDownHandler: ((gridId: number, col: number, row: number) => void) | null = null;
   private _config: Match3Config | null = null;
+  private _outline: THREE.Mesh | null = null;
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
     this._config = resolver.getInstance(Match3Config);
+  }
+
+  public override postInitialize(): void {
+    super.postInitialize();
+    this._createBoardOutline();
+  }
+
+  /**
+   * A single frame around the whole grid, replacing the per-cell planes.
+   * Built as one flat ring mesh (outer rect + inner rect hole) rather than
+   * `LineSegments`, because WebGL ignores `linewidth` — a mesh is the only way
+   * to get a controllable stroke width.
+   *
+   * The grid recenters its cell layout on the origin (see `Match3App`), and this
+   * view sits at the origin too, so a centered frame lines up with the cells.
+   */
+  private _createBoardOutline(): void {
+    const cfg = this._config;
+    if (!cfg || this._outline) return;
+
+    const w = cfg.cols * cfg.gridColumnSize + cfg.boardOutlinePadding * 2;
+    const d = cfg.rows * cfg.gridRowSize + cfg.boardOutlinePadding * 2;
+    const t = cfg.boardOutlineThickness;
+    const hw = w * 0.5;
+    const hd = d * 0.5;
+
+    const shape = new THREE.Shape();
+    shape.moveTo(-hw, -hd);
+    shape.lineTo(hw, -hd);
+    shape.lineTo(hw, hd);
+    shape.lineTo(-hw, hd);
+    shape.closePath();
+
+    // Wound opposite to the outer contour so it cuts a hole instead of filling.
+    const hole = new THREE.Path();
+    hole.moveTo(-hw + t, -hd + t);
+    hole.lineTo(-hw + t, hd - t);
+    hole.lineTo(hw - t, hd - t);
+    hole.lineTo(hw - t, -hd + t);
+    hole.closePath();
+    shape.holes.push(hole);
+
+    // MeshBasic: a flat outline should not react to scene lighting.
+    const mesh = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshBasicMaterial({ color: cfg.boardOutlineColor, side: THREE.DoubleSide })
+    );
+    mesh.rotation.x = -Math.PI / 2; // shape XY → world XZ (top-down board plane)
+    mesh.position.y = GameBoardsView.OUTLINE_Y;
+    this.add(mesh);
+    this._outline = mesh;
   }
 
   public setCellPointerDownHandler(handler: ((gridId: number, col: number, row: number) => void) | null): void {
@@ -173,6 +228,12 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
 
   public override preDestroy(): void {
     this._stopAllGemAnimations();
+    if (this._outline) {
+      this._outline.removeFromParent();
+      this._outline.geometry.dispose();
+      (this._outline.material as THREE.Material).dispose();
+      this._outline = null;
+    }
     super.preDestroy();
   }
 

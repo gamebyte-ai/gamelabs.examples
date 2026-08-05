@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { vector } from "@js-basics/vector";
 import { AssetTypes, GamelabsApp, GameCameraBinding, GameCameraManager, GridsModel, LogTypes, Topdown2dCameraController, UIComponentsBinding, UIEvents, SettingsBinding, SettingsBooleanField, SettingsNumberField, SettingsManager } from "@gamebyte/gamelabsjs";
 import { Match3AssetIds } from "./Match3AssetIds.js";
@@ -13,7 +14,7 @@ import { GameBoardsView } from "./modules/gamegrid/views/GameBoardsView.three.js
 import { Match3UIIds } from "./Match3UIIds.js";
 
 export class Match3App extends GamelabsApp {
-  private readonly _config = new Match3Config();
+  private readonly _config: Match3Config;
   private readonly _gameGridBinding = new Match3GameGridBinding();
   private readonly _gameCameraBinding = new GameCameraBinding();
   private readonly _settingsBinding = new SettingsBinding();
@@ -23,7 +24,15 @@ export class Match3App extends GamelabsApp {
   private _cameraManager: GameCameraManager | null = null;
 
   public constructor(stageEl: HTMLElement) {
-    super({ mount: stageEl, configOverridesUrl: "./game-config.json" });
+    // Built before super() so the viewport can read the aspect from the config:
+    // instance fields are only initialized after super() returns, so the usual
+    // `_config = new Match3Config()` initializer would be too late here.
+    const config = new Match3Config();
+    // The viewport letterboxes the render surface — both canvases (Three world +
+    // Pixi HUD) are held inside the aspect band and centered in the mount, with
+    // the bars painted on the mount (see Match3Config.viewport).
+    super({ mount: stageEl, configOverridesUrl: "./game-config.json", viewport: config.viewport });
+    this._config = config;
   }
 
   protected override getOverridableConfig(): object {
@@ -76,6 +85,10 @@ export class Match3App extends GamelabsApp {
     settings.addField(new SettingsNumberField("musicVolume", "Music Volume", 70, 0, 100, 5));
     settings.addField(new SettingsNumberField("sfxVolume", "SFX Volume", 100, 0, 100, 5));
 
+    // Scene backdrop. Distinct from the viewport `background` above: that one
+    // colors the letterbox bars (mount element), this one the play area itself.
+    this.world.scene.background = new THREE.Color(this._config.backgroundColor);
+
     this.diContainer.getInstance(UIEvents).createScreen(Match3UIIds.GameScreen, this._config.transitions.gameScreenEnter);
     this.world.addRootView(this.viewFactory.createView(GameBoardsView));
 
@@ -87,13 +100,30 @@ export class Match3App extends GamelabsApp {
     this._cameraManager = this.diContainer.getInstance(GameCameraManager);
     this._cameraManager.initialize(this.world);
     this._cameraController = new Topdown2dCameraController(this._cameraManager).register();
-    this._cameraManager.setOrthoSize(this._config.cameraOrthoSize);
     this._cameraController.followPosition(0, 0, 0);
+    // `initialize()` calls requestResize() right after this hook, so onResize
+    // sets the real framing a moment later; this is only the first-frame value.
+    this._applyCameraZoom(this.width, this.height);
   }
 
   protected override onResize(width: number, height: number, dpr: number): void {
     super.onResize(width, height, dpr);
     this._cameraManager?.resize(width, height);
+    this._applyCameraZoom(width, height);
+  }
+
+  /**
+   * Scale the board with the screen: the ortho frustum height lerps across the
+   * `camera` aspect band and pins outside it, so a narrow screen zooms out (board
+   * shrinks to stay inside the side edges) and a wider one zooms in up to
+   * `maxAspect`. Width follows the true aspect, so nothing is ever stretched.
+   */
+  private _applyCameraZoom(width: number, height: number): void {
+    if (!this._cameraManager || width <= 0 || height <= 0) return;
+    const c = this._config.camera;
+    const span = c.maxAspect - c.minAspect;
+    const t = span > 0 ? Math.max(0, Math.min(1, (width / height - c.minAspect) / span)) : 0;
+    this._cameraManager.setOrthoSize(c.orthoAtMin + (c.orthoAtMax - c.orthoAtMin) * t);
   }
 
   protected override onStep(timestepSeconds: number): void {

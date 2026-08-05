@@ -4,7 +4,6 @@ import { GridCellObject, GridCellObjectOptions, POINTER_INPUT_LAYER, type IGridO
 
 export class GameBoardCellObject extends GridCellObject implements IPointerInputHandler {
   private static readonly COLLIDER_THICKNESS = 0.22;
-  private static readonly PLANE_Y = 0.01;
 
   public declare readonly preset: RectGridPreset;
 
@@ -12,15 +11,12 @@ export class GameBoardCellObject extends GridCellObject implements IPointerInput
     super(options, pointerListener, inputManager, assetManager);
   }
 
-  protected override createVisual(): void {
-    const material = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.1, roughness: 0.85 });
-    const geom = new THREE.PlaneGeometry(this.preset.columnSize * 0.92, this.preset.rowSize * 0.92);
-    const mesh = new THREE.Mesh(geom, material);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.receiveShadow = true;
-    mesh.position.set(0, GameBoardCellObject.PLANE_Y, 0);
-    this.add(mesh);
-  }
+  /**
+   * Cells are deliberately not drawn — the board reads as the scene backdrop
+   * with a single outline around the grid (see `GameBoardsView`). The collider
+   * below is unaffected, so cell picking still works.
+   */
+  protected override createVisual(): void {}
 
   protected override createCollider(): void {
     const material = new THREE.MeshBasicMaterial({ visible: false });

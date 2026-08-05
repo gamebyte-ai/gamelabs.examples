@@ -10,6 +10,10 @@ async function start(): Promise<void> {
   const app = new Match3App(stage);
   await app.initialize();
   app.mainLoop();
+  // Host-comm: impression signal for playable-ad / portal hosts. The framework
+  // auto-fires `interaction` on the first pointer, so this is the only manual
+  // event an endless board needs.
+  app.informHost({ type: "ready" });
 }
 
 window.addEventListener("load", () => {

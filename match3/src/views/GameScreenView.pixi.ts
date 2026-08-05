@@ -40,12 +40,17 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   public override onResize(width: number, height: number, dpr: number): void {
     super.onResize(width, height, dpr);
     this._screenWidth = Math.max(1, width);
+
+    // Both widgets hug screen edges, so shift them inward by the safe-area
+    // insets (notch / Dynamic Island / home indicator). Zero on devices with no
+    // unsafe region, so the desktop layout is unchanged.
+    const safe = this.safeAreaInsets;
     if (this._scoreText) {
-      this._scoreText.x = 16;
-      this._scoreText.y = 12;
+      this._scoreText.x = 16 + safe.left;
+      this._scoreText.y = 12 + safe.top;
     }
     if (this._settingsBtn) {
-      this._settingsBtn.position.set(this._screenWidth - 52, 12);
+      this._settingsBtn.position.set(this._screenWidth - 52 - safe.right, 12 + safe.top);
     }
   }
 
