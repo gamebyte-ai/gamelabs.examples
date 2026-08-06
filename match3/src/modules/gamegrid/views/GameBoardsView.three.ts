@@ -10,10 +10,13 @@ import { GameBoardItemObject } from "./GameBoardItemObject.js";
 export class GameBoardsView extends GridsView implements IGameBoardsView {
   /** Just above the cell plane so the outline is never z-fighting the backdrop. */
   private static readonly OUTLINE_Y = 0.02;
+  /** Between the outline and the gems (`0.06`). */
+  private static readonly BACKDROP_Y = 0.03;
 
-  private _cellPointerDownHandler: ((gridId: number, col: number, row: number) => void) | null = null;
+  private _cellPointerDownHandler: ((gridId: number, col: number, row: number, event: PointerEvent) => void) | null = null;
   private _config: Match3Config | null = null;
   private _outline: THREE.Mesh | null = null;
+  private _backdrop: THREE.Mesh | null = null;
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -22,7 +25,45 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
 
   public override postInitialize(): void {
     super.postInitialize();
+    this._createBoardBackdrop();
     this._createBoardOutline();
+  }
+
+  /**
+   * Translucent panel filling the grid, so the board reads as a surface against
+   * the scene backdrop without drawing anything per cell. Sits below the gems
+   * (y `0.06`) and above the outline (y `0.02`).
+   */
+  private _createBoardBackdrop(): void {
+    const cfg = this._config;
+    if (!cfg || this._backdrop) return;
+    // Opacity 0 means "no panel at all" rather than an invisible mesh in the scene.
+    if (cfg.boardBackgroundOpacity <= 0) return;
+
+    const { width, depth } = this._boardExtents(cfg);
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({
+        color: cfg.boardBackgroundColor,
+        transparent: true,
+        opacity: cfg.boardBackgroundOpacity,
+        // The panel is behind the gems and must never occlude them, and it has
+        // nothing to sort against on its own layer.
+        depthWrite: false
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = GameBoardsView.BACKDROP_Y;
+    this.add(mesh);
+    this._backdrop = mesh;
+  }
+
+  /** Outer size of the board including the outline padding, in world units. */
+  private _boardExtents(cfg: Match3Config): { width: number; depth: number } {
+    return {
+      width: cfg.cols * cfg.gridColumnSize + cfg.boardOutlinePadding * 2,
+      depth: cfg.rows * cfg.gridRowSize + cfg.boardOutlinePadding * 2
+    };
   }
 
   /**
@@ -38,8 +79,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const cfg = this._config;
     if (!cfg || this._outline) return;
 
-    const w = cfg.cols * cfg.gridColumnSize + cfg.boardOutlinePadding * 2;
-    const d = cfg.rows * cfg.gridRowSize + cfg.boardOutlinePadding * 2;
+    const { width: w, depth: d } = this._boardExtents(cfg);
     const t = cfg.boardOutlineThickness;
     const hw = w * 0.5;
     const hd = d * 0.5;
@@ -71,12 +111,12 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     this._outline = mesh;
   }
 
-  public setCellPointerDownHandler(handler: ((gridId: number, col: number, row: number) => void) | null): void {
+  public setCellPointerDownHandler(handler: ((gridId: number, col: number, row: number, event: PointerEvent) => void) | null): void {
     this._cellPointerDownHandler = handler;
   }
 
-  public override onGridCellPointerDown(gridId: number, col: number, row: number, _event: PointerEvent): void {
-    this._cellPointerDownHandler?.(gridId, col, row);
+  public override onGridCellPointerDown(gridId: number, col: number, row: number, event: PointerEvent): void {
+    this._cellPointerDownHandler?.(gridId, col, row, event);
   }
 
   public updateGemSelection(gridId: number, selected: { col: number; row: number } | null): void {
@@ -99,9 +139,17 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const t2 = this._localTowardCell(go, cell2, c1, r1);
     const half = cfg.animInvalidSwapSec * 0.5;
     return new Promise((resolve) => {
-      const tl = gsap.timeline({ onComplete: () => resolve() });
-      tl.to(gem1.position, { x: t1.x, y: t1.y, z: t1.z, duration: half, ease: "power2.inOut" }, 0);
-      tl.to(gem2.position, { x: t2.x, y: t2.y, z: t2.z, duration: half, ease: "power2.inOut" }, 0);
+      // The bounce is two legs — out, then back. If a concurrent chain kills the
+      // timeline after the first leg the gem would be stranded beside its cell, so
+      // interruption snaps both gems home just like completion does.
+      const home = (): void => {
+        gem1.position.set(0, 0, 0);
+        gem2.position.set(0, 0, 0);
+        resolve();
+      };
+      const tl = gsap.timeline({ onComplete: home, onInterrupt: home });
+      tl.to(gem1.position, { x: t1.x, y: t1.y, z: t1.z, duration: half, ease: "power2.inOut", overwrite: true }, 0);
+      tl.to(gem2.position, { x: t2.x, y: t2.y, z: t2.z, duration: half, ease: "power2.inOut", overwrite: true }, 0);
       tl.to(gem1.position, { x: 0, y: 0, z: 0, duration: half, ease: "power2.inOut" });
       tl.to(gem2.position, { x: 0, y: 0, z: 0, duration: half, ease: "power2.inOut" }, "<");
     });
@@ -117,12 +165,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const dur = cfg.animSwapSec;
     return new Promise((resolve) => {
       let left = 2;
+      // The model applies the swap once this resolves, so an interrupted tween must
+      // still settle and report — otherwise the swap would never be committed.
       const done = (): void => {
         left--;
         if (left <= 0) resolve();
       };
-      gsap.to(gem1.position, { x: t1.x, y: t1.y, z: t1.z, duration: dur, ease: "power2.inOut", onComplete: done });
-      gsap.to(gem2.position, { x: t2.x, y: t2.y, z: t2.z, duration: dur, ease: "power2.inOut", onComplete: done });
+      gsap.to(gem1.position, { x: t1.x, y: t1.y, z: t1.z, duration: dur, ease: "power2.inOut", overwrite: true, onComplete: done, onInterrupt: done });
+      gsap.to(gem2.position, { x: t2.x, y: t2.y, z: t2.z, duration: dur, ease: "power2.inOut", overwrite: true, onComplete: done, onInterrupt: done });
     });
   }
 
@@ -141,7 +191,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         if (n <= 0) resolve();
       };
       for (const { row, col } of matches) {
-        const gem = this._getGem(go, col, row);
+        const gem = this._resetGemOrNull(this._getGem(go, col, row));
         if (!gem) {
           doneOne();
           continue;
@@ -174,7 +224,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         if (n <= 0) resolve();
       };
       for (const m of moves) {
-        const gem = this._getGem(go, m.toCol, m.toRow);
+        const gem = this._resetGemOrNull(this._getGem(go, m.toCol, m.toRow));
         if (!gem) {
           doneOne();
           continue;
@@ -214,7 +264,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       for (const [, list] of byCol) {
         for (let i = 0; i < list.length; i++) {
           const s = list[i];
-          const gem = this._getGem(go, s.col, s.row);
+          const gem = this._resetGemOrNull(this._getGem(go, s.col, s.row));
           if (!gem) continue;
           const depth = i + 1;
           gem.position.add(this._negRowAxisOffset(go, depth * step * 0.92));
@@ -228,13 +278,18 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
 
   public override preDestroy(): void {
     this._stopAllGemAnimations();
-    if (this._outline) {
-      this._outline.removeFromParent();
-      this._outline.geometry.dispose();
-      (this._outline.material as THREE.Material).dispose();
-      this._outline = null;
-    }
+    this._disposeMesh(this._outline);
+    this._outline = null;
+    this._disposeMesh(this._backdrop);
+    this._backdrop = null;
     super.preDestroy();
+  }
+
+  private _disposeMesh(mesh: THREE.Mesh | null): void {
+    if (!mesh) return;
+    mesh.removeFromParent();
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
   }
 
   private _stopAllGemAnimations(): void {
@@ -253,6 +308,20 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     return item instanceof GameBoardItemObject ? item : null;
   }
 
+  /**
+   * Cancels whatever tween a gem is in and snaps it to its cell before a new one
+   * starts. Chains overlap by design — a gem can still be visually falling when the
+   * next match claims it — and the model is already authoritative at that point, so
+   * the stale tween is just leftover motion to discard.
+   */
+  private _resetGemOrNull(gem: GameBoardItemObject | null): GameBoardItemObject | null {
+    if (!gem) return null;
+    gem.killAnimations();
+    gem.position.set(0, 0, 0);
+    gem.scale.set(1, 1, 1);
+    return gem;
+  }
+
   private _swapPair(gridId: number, r1: number, c1: number, r2: number, c2: number): { gem1: GameBoardItemObject; gem2: GameBoardItemObject; cell1: GridCellObject; cell2: GridCellObject; go: GridObject } | null {
     const go = this.getGridObject(gridId);
     if (!go) return null;
@@ -261,6 +330,10 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const g1 = cell1?.item;
     const g2 = cell2?.item;
     if (!(g1 instanceof GameBoardItemObject) || !(g2 instanceof GameBoardItemObject) || !cell1 || !cell2) return null;
+    // Either gem may still be finishing a fall from an earlier chain; clear that
+    // tween first so it cannot fight the swap and leave the gem off its cell.
+    this._resetGemOrNull(g1);
+    this._resetGemOrNull(g2);
     return { gem1: g1, gem2: g2, cell1, cell2, go };
   }
 

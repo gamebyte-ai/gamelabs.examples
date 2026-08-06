@@ -18,7 +18,7 @@ export class Match3Config {
   public static readonly SHOW_CELL_PLANES = false;
   public readonly rows = 8;
   public readonly cols = 8;
-  public readonly gemTypeCount = 5;
+  public readonly gemTypeCount = 4;
   /** World cell size for {@link RectGridPreset} (Three.js board). */
   public readonly gridColumnSize = 0.92;
   public readonly gridRowSize = 0.92;
@@ -59,13 +59,23 @@ export class Match3Config {
     background: "#000000"
   };
   /** Scene backdrop behind the board. Letterbox bars stay the mount color, not this. */
-  public readonly backgroundColor = 0x202020;
+  public readonly backgroundColor = 0x819194;
+  /** Translucent panel filling the grid, drawn under the gems. */
+  public readonly boardBackgroundColor = 0xffffff;
+  /** 0 = no panel drawn at all, 1 = solid. Any white here washes the board out. */
+  public readonly boardBackgroundOpacity = 0;
   /** Outline framing the whole grid. Individual cells are not drawn. */
-  public readonly boardOutlineColor = 0xe2e8f0;
+  public readonly boardOutlineColor = 0xffffff;
   /** Outline stroke width in world units. */
   public readonly boardOutlineThickness = 0.09;
   /** Gap between the outermost cells and the outline. */
   public readonly boardOutlinePadding = 0.12;
+  /**
+   * Pointer travel (screen px) that separates a swipe from a tap. Below it the
+   * press selects/deselects a gem; at or above it the gem swaps with its
+   * neighbour in the dominant drag direction.
+   */
+  public readonly swipeMinDistancePx = 24;
   public readonly scorePerGem = 10;
   public readonly gemColors: readonly number[] = Match3Config.GEM_PALETTE;
   public readonly animSwapSec = 0.24;

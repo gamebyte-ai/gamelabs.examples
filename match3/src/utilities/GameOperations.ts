@@ -95,11 +95,18 @@ export class GameOperations implements IInjectionTarget {
     }
   }
 
-  public applyGravity(): GravityMove[] {
+  /**
+   * Compacts gems downward. `onlyCols` restricts the pass to those columns, which
+   * is what lets two matches resolve side by side without touching each other's
+   * gems — a column with no gaps is a no-op anyway, so the scoped and unscoped
+   * results agree wherever they overlap.
+   */
+  public applyGravity(onlyCols?: ReadonlySet<number>): GravityMove[] {
     const rows = this._config.rows;
     const cols = this._config.cols;
     const moves: GravityMove[] = [];
     for (let col = 0; col < cols; col++) {
+      if (onlyCols && !onlyCols.has(col)) continue;
       let write = rows - 1;
       for (let row = rows - 1; row >= 0; row--) {
         const cell = this._grid.getCell(col, row);
@@ -117,10 +124,12 @@ export class GameOperations implements IInjectionTarget {
     return moves;
   }
 
-  public refillEmpty(): RefillSpawn[] {
+  /** Fills empty cells with fresh gems. `onlyCols` scopes it, as in {@link applyGravity}. */
+  public refillEmpty(onlyCols?: ReadonlySet<number>): RefillSpawn[] {
     const n = this._config.gemTypeCount;
     const spawns: RefillSpawn[] = [];
     for (let col = 0; col < this._config.cols; col++) {
+      if (onlyCols && !onlyCols.has(col)) continue;
       for (let row = 0; row < this._config.rows; row++) {
         const cell = this._grid.getCell(col, row);
         if (cell?.item) continue;

@@ -89,6 +89,14 @@ export class Match3App extends GamelabsApp {
     // colors the letterbox bars (mount element), this one the play area itself.
     this.world.scene.background = new THREE.Color(this._config.backgroundColor);
 
+    // `World` ships a default Fog(0x0b0f14, 4, 20) for 3D scenes. The top-down
+    // camera sits 10 units up, which lands at a 0.375 fog factor, so every
+    // material — MeshBasicMaterial included, it is fog-enabled by default — gets
+    // 37% dark navy mixed in and white renders as grey. A flat 2D board has no use
+    // for depth cueing, so drop it. `scene.background` is unaffected by fog either
+    // way, which is why only the board looked washed out.
+    this.world.scene.fog = null;
+
     this.diContainer.getInstance(UIEvents).createScreen(Match3UIIds.GameScreen, this._config.transitions.gameScreenEnter);
     this.world.addRootView(this.viewFactory.createView(GameBoardsView));
 
