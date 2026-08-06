@@ -1,16 +1,1 @@
-{
-  "animSwapSec": 0.24,
-  "animInvalidSwapSec": 0.2,
-  "animPopSec": 0.32,
-  "animPopEase": "power2.out",
-  "animFallSec": 0.4,
-  "animSpawnSec": 0.42,
-  "animFallEase": "power2.in",
-  "gemShadow": {
-    "opacity": 0.35,
-    "scale": 1.12,
-    "offsetX": 0.035,
-    "offsetZ": 0.045,
-    "softness": 0.35
-  }
-}
+{}

@@ -255,10 +255,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         // short of the cell it is leaving, which shows up as a jump on frame one.
         const lift = Math.max(1, steps) * cellStep;
         gem.position.add(this._negRowAxisOffset(go, lift));
-        gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: cfg.animFallEase, onComplete: () => {
+        // `onInterrupt` matters as much as `onComplete`: another chain claiming this
+        // gem kills the tween, and without it this promise would never settle — the
+        // caller would wait forever and never release the cell.
+        const land = (): void => {
           gem.position.set(0, 0, 0);
           doneOne();
-        } });
+        };
+        gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: cfg.animFallEase, onComplete: land, onInterrupt: land });
       }
     });
   }
@@ -296,7 +300,13 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           if (!gem) continue;
           gem.position.add(this._negRowAxisOffset(go, lift));
           total++;
-          gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: cfg.animFallEase, onComplete: check });
+          // Same reason as the gravity tween: an interrupted spawn still has to
+          // report, or the caller hangs and the cell stays locked.
+          const land = (): void => {
+            gem.position.set(0, 0, 0);
+            check();
+          };
+          gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: cfg.animFallEase, onComplete: land, onInterrupt: land });
         }
       }
       if (total === 0) resolve();

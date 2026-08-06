@@ -101,8 +101,8 @@ export class Match3Config {
    * centre, 1 = solid disc with a hard edge). `opacity` 0 disables it entirely.
    */
   public readonly gemShadow = {
-    opacity: 0.35,
-    scale: 1.12,
+    opacity: 0.15,
+    scale: 1,
     offsetX: 0.035,
     offsetZ: 0.045,
     softness: 0.35
@@ -135,7 +135,7 @@ export class Match3Config {
   /** Gems trading places on a valid swap. */
   public readonly animSwapSec = 0.24;
   /** Bounce-and-return when a swap makes no match. Half out, half back. */
-  public readonly animInvalidSwapSec = 0.2;
+  public readonly animInvalidSwapSec = 0.3;
   /** Pop: the gem shrinks away. Overlaps the fall, so it costs no wait. */
   public readonly animPopSec = 0.32;
   /**
@@ -145,9 +145,9 @@ export class Match3Config {
    */
   public readonly animPopEase = "power2.out";
   /** Surviving gems dropping into the gaps. Part of the gate on the next match. */
-  public readonly animFallSec = 0.2;
+  public readonly animFallSec = 0.3;
   /** Fresh gems falling in from above the board. The other half of that gate. */
-  public readonly animSpawnSec = 0.2;
+  public readonly animSpawnSec = 0.3;
   /**
    * Easing for gems dropping in (gravity + refill). Kept out of `bounce.*` on
    * purpose: a bounce lands the gem early but keeps the tween alive through its

@@ -29,6 +29,13 @@ export class GameBoardsViewController extends GridsViewController {
    * chain may claim it. The view cancels the stale tween on the way in.
    */
   private readonly _claimedCells = new Set<string>();
+  /**
+   * Cells whose gem is mid-flight — falling into a gap or dropping in from above.
+   * Blocks PLAYER input only, deliberately not {@link _settle}: a gem in the air is
+   * not something you can grab, but the board is free to keep resolving cascades
+   * through it, which is what keeps chains independent of one another.
+   */
+  private readonly _animatingCells = new Set<string>();
   /** Cell + screen position of the press in flight, used to classify tap vs swipe. */
   private _press: { gridId: number; col: number; row: number; x: number; y: number } | null = null;
   private readonly _onPointerUp = (e: PointerEvent): void => this._handlePointerUp(e);
@@ -67,7 +74,7 @@ export class GameBoardsViewController extends GridsViewController {
    * told apart once the pointer has stopped moving.
    */
   private _onGridCellPointerDown(gridId: number, col: number, row: number, event: PointerEvent): void {
-    if (gridId !== Match3Config.GRID_ID || this._claimedCells.has(this._cellKey(row, col))) return;
+    if (gridId !== Match3Config.GRID_ID || this._isCellBusy(row, col)) return;
     this._press = { gridId, col, row, x: event.clientX, y: event.clientY };
   }
 
@@ -113,7 +120,7 @@ export class GameBoardsViewController extends GridsViewController {
     const svc = this._operations;
     const view = this._gridsView;
     const events = this._gameEvents;
-    if (!svc || !view || !events || this._claimedCells.has(this._cellKey(row, col))) return;
+    if (!svc || !view || !events || this._isCellBusy(row, col)) return;
 
     if (this._selected === null) {
       this._selected = { col, row };
@@ -152,7 +159,7 @@ export class GameBoardsViewController extends GridsViewController {
     if (!svc.isAdjacent(r0, c0, r1, c1)) return;
     const k0 = this._cellKey(r0, c0);
     const k1 = this._cellKey(r1, c1);
-    if (this._claimedCells.has(k0) || this._claimedCells.has(k1)) return;
+    if (this._isCellBusy(r0, c0) || this._isCellBusy(r1, c1)) return;
 
     // Hold just these two cells for the swap tween. Every other cell stays playable,
     // and the chain started below claims only the cells it actually pops.
@@ -203,6 +210,12 @@ export class GameBoardsViewController extends GridsViewController {
     }
   }
 
+  /** Off limits to the player: mid-pop (claimed by a chain) or still in the air. */
+  private _isCellBusy(row: number, col: number): boolean {
+    const key = this._cellKey(row, col);
+    return this._claimedCells.has(key) || this._animatingCells.has(key);
+  }
+
   private _cellKey(row: number, col: number): string {
     return `${row},${col}`;
   }
@@ -251,7 +264,19 @@ export class GameBoardsViewController extends GridsViewController {
     // the board visibly wait with a gap at the top before anything came in.
     const moves = svc.applyGravity(cols);
     const spawns = svc.refillEmpty(cols);
-    await Promise.all([view.animateGravityMoves(gridId, moves), view.animateRefillSpawns(gridId, spawns)]);
+
+    // Their destination cells hold the gems that are now in the air, so input stays
+    // off them until they land.
+    const inFlight = [
+      ...moves.map((m) => this._cellKey(m.toRow, m.toCol)),
+      ...spawns.map((s) => this._cellKey(s.row, s.col))
+    ];
+    for (const k of inFlight) this._animatingCells.add(k);
+    try {
+      await Promise.all([view.animateGravityMoves(gridId, moves), view.animateRefillSpawns(gridId, spawns)]);
+    } finally {
+      for (const k of inFlight) this._animatingCells.delete(k);
+    }
     events.emitScoreChanged(this._gameModel!.score);
 
     this._settle(gridId);
