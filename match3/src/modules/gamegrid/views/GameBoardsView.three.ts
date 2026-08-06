@@ -8,10 +8,10 @@ import type { IGameBoardsView } from "./IGameBoardsView.js";
 import { GameBoardItemObject } from "./GameBoardItemObject.js";
 
 export class GameBoardsView extends GridsView implements IGameBoardsView {
-  /** Just above the cell plane so the outline is never z-fighting the backdrop. */
+  /** The board's own panel. Below the outline so an opaque panel cannot cover it. */
+  private static readonly BACKDROP_Y = 0.015;
+  /** Drawn over the panel, under the gem shadows (`0.045`). */
   private static readonly OUTLINE_Y = 0.02;
-  /** Between the outline and the gems (`0.06`). */
-  private static readonly BACKDROP_Y = 0.03;
 
   private _cellPointerDownHandler: ((gridId: number, col: number, row: number, event: PointerEvent) => void) | null = null;
   private _config: Match3Config | null = null;
@@ -30,9 +30,9 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   }
 
   /**
-   * Translucent panel filling the grid, so the board reads as a surface against
-   * the scene backdrop without drawing anything per cell. Sits below the gems
-   * (y `0.06`) and above the outline (y `0.02`).
+   * The board's own panel, filling the grid so it reads as a surface distinct from
+   * the scene backdrop without drawing anything per cell. Sits under the outline and
+   * the gems; opaque unless the configured opacity says otherwise.
    */
   private _createBoardBackdrop(): void {
     const cfg = this._config;
@@ -45,10 +45,11 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       new THREE.PlaneGeometry(width, depth),
       new THREE.MeshBasicMaterial({
         color: cfg.boardBackgroundColor,
-        transparent: true,
+        // Only pay for blending when it is actually translucent; a solid panel goes
+        // through the opaque path and sorts normally.
+        transparent: cfg.boardBackgroundOpacity < 1,
         opacity: cfg.boardBackgroundOpacity,
-        // The panel is behind the gems and must never occlude them, and it has
-        // nothing to sort against on its own layer.
+        // The panel is behind the gems and must never occlude them.
         depthWrite: false
       })
     );
@@ -60,10 +61,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
 
   /** Outer size of the board including the outline padding, in world units. */
   private _boardExtents(cfg: Match3Config): { width: number; depth: number } {
-    return {
-      width: cfg.cols * cfg.gridColumnSize + cfg.boardOutlinePadding * 2,
-      depth: cfg.rows * cfg.gridRowSize + cfg.boardOutlinePadding * 2
-    };
+    return { width: cfg.boardWidth, depth: cfg.boardDepth };
   }
 
   /**
@@ -176,36 +174,59 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     });
   }
 
+  /**
+   * Pops the matched gems. Each one is DETACHED from its cell first
+   * (`GridCellObject.takeItem()`) and reparented onto this view at the same world
+   * position, so the pop is no longer tied to the cell's lifetime: the model can be
+   * cleared and the gems above can start falling immediately while the pop plays
+   * out. Waiting for the pop before dropping was the stall it replaces.
+   *
+   * Detaching also means this view now owns the object, so each gem is disposed when
+   * its tween ends — the framework's `destroyItem` bails out on a cell it no longer
+   * holds an item for, so nothing else will clean it up.
+   */
   public animateClearMatches(gridId: number, matches: { row: number; col: number }[]): Promise<void> {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
     if (!cfg || !go || matches.length === 0) return Promise.resolve();
     const total = cfg.animPopSec;
-    const upDur = total * 0.42;
-    const downDur = total * 0.52;
-    const peak = cfg.animPopPeakScale;
     return new Promise((resolve) => {
       let n = matches.length;
       const doneOne = (): void => {
         n--;
         if (n <= 0) resolve();
       };
+      const world = new THREE.Vector3();
       for (const { row, col } of matches) {
-        const gem = this._resetGemOrNull(this._getGem(go, col, row));
-        if (!gem) {
+        const cell = go.getCell(col, row);
+        const taken = cell?.takeItem();
+        const gem = taken instanceof GameBoardItemObject ? this._resetGemOrNull(taken) : null;
+        if (!cell || !gem) {
           doneOne();
           continue;
         }
-        const tl = gsap.timeline({
-          onComplete: () => {
-            gem.killAnimations();
-            gem.position.set(0, 0, 0);
-            gem.scale.set(1, 1, 1);
-            doneOne();
-          }
+        // Reparenting resets the local frame, so re-place the gem where it already
+        // appeared on screen.
+        cell.getWorldPosition(world);
+        this.add(gem);
+        gem.position.copy(this.worldToLocal(world.clone()));
+
+        const end = (): void => {
+          this._disposeGem(gem);
+          doneOne();
+        };
+        // Straight to shrinking — no scale-up overshoot first. Effects will layer on
+        // top of this later, so the pop itself stays a plain uniform shrink.
+        gsap.to(gem.scale, {
+          x: 0.02,
+          y: 0.02,
+          z: 0.02,
+          duration: total,
+          ease: cfg.animPopEase,
+          overwrite: true,
+          onComplete: end,
+          onInterrupt: end
         });
-        tl.to(gem.scale, { x: peak, y: peak, z: peak, duration: upDur, ease: "back.out(1.55)" }, 0);
-        tl.to(gem.scale, { x: 0.02, y: 0.02, z: 0.02, duration: downDur, ease: "power3.in" });
       }
     });
   }
@@ -230,9 +251,11 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           continue;
         }
         const steps = Math.abs(m.toRow - m.fromRow) + Math.abs(m.toCol - m.fromCol);
-        const lift = Math.max(1, steps) * cellStep * 0.92;
+        // Exactly the distance travelled — a fudge factor here would start the gem
+        // short of the cell it is leaving, which shows up as a jump on frame one.
+        const lift = Math.max(1, steps) * cellStep;
         gem.position.add(this._negRowAxisOffset(go, lift));
-        gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: "bounce.out", onComplete: () => {
+        gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: cfg.animFallEase, onComplete: () => {
           gem.position.set(0, 0, 0);
           doneOne();
         } });
@@ -262,14 +285,18 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         if (completed >= total) resolve();
       };
       for (const [, list] of byCol) {
-        for (let i = 0; i < list.length; i++) {
-          const s = list[i];
+        // One lift for the whole column, not a per-gem depth. Their targets are
+        // already a cell apart, so a shared offset keeps that exact spacing and puts
+        // the new run directly above the board — the column reads as one continuous
+        // stack sliding in. Per-gem offsets bunched them together at the start and
+        // let them spread out mid-fall.
+        const lift = list.length * step;
+        for (const s of list) {
           const gem = this._resetGemOrNull(this._getGem(go, s.col, s.row));
           if (!gem) continue;
-          const depth = i + 1;
-          gem.position.add(this._negRowAxisOffset(go, depth * step * 0.92));
+          gem.position.add(this._negRowAxisOffset(go, lift));
           total++;
-          gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: "bounce.out", onComplete: check });
+          gsap.to(gem.position, { x: 0, y: 0, z: 0, duration: dur, ease: cfg.animFallEase, onComplete: check });
         }
       }
       if (total === 0) resolve();
@@ -283,6 +310,19 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     this._disposeMesh(this._backdrop);
     this._backdrop = null;
     super.preDestroy();
+  }
+
+  /** Frees a gem this view took over from a cell, GPU resources included. */
+  private _disposeGem(gem: GameBoardItemObject): void {
+    gem.killAnimations();
+    gem.removeFromParent();
+    gem.traverse((node) => {
+      if (!(node instanceof THREE.Mesh)) return;
+      node.geometry.dispose();
+      const material = node.material;
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material.dispose();
+    });
   }
 
   private _disposeMesh(mesh: THREE.Mesh | null): void {

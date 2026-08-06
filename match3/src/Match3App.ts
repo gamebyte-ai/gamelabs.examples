@@ -97,6 +97,21 @@ export class Match3App extends GamelabsApp {
     // way, which is why only the board looked washed out.
     this.world.scene.fog = null;
 
+    // Refilled gems start above the board and fall in, so without clipping they are
+    // visible outside the frame on the way down. Four world-space planes at the
+    // board's outer edge keep every gem inside it. Global (renderer-level) rather
+    // than per-material because gem materials are built by the grid module, which
+    // has no config access — and everything else in this scene is inside the board
+    // anyway, the outline sitting exactly on the boundary.
+    const halfW = this._config.boardWidth * 0.5;
+    const halfD = this._config.boardDepth * 0.5;
+    this.world.renderer.clippingPlanes = [
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), halfW),
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfW),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), halfD),
+      new THREE.Plane(new THREE.Vector3(0, 0, -1), halfD)
+    ];
+
     this.diContainer.getInstance(UIEvents).createScreen(Match3UIIds.GameScreen, this._config.transitions.gameScreenEnter);
     this.world.addRootView(this.viewFactory.createView(GameBoardsView));
 

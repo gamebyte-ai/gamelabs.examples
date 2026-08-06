@@ -57,7 +57,8 @@ export class GameBoardsViewController extends GridsViewController {
 
   protected override createItemObjectOption(item: IGridItem, grid: IRectGrid): GameBoardItemObjectOptions {
     if (!(item instanceof GameBoardItem)) throw new Error("Expected GameBoardItem");
-    return new GameBoardItemObjectOptions(item.itemId, grid.preset, item.gemType);
+    const shadow = this._config?.gemShadow ?? new Match3Config().gemShadow;
+    return new GameBoardItemObjectOptions(item.itemId, grid.preset, item.gemType, shadow);
   }
 
   /**
@@ -232,7 +233,10 @@ export class GameBoardsViewController extends GridsViewController {
     const cols = new Set(cells.map((c) => c.col));
     try {
       events.emitPlaySfx(Match3AssetIds.SfxPop);
-      await view.animateClearMatches(gridId, cells);
+      // NOT awaited. The view detaches these gems from their cells, so the pop plays
+      // on its own and the drop below can start at once — awaiting it here is what
+      // used to stall the fall behind the full pop duration.
+      void view.animateClearMatches(gridId, cells);
       svc.clearMatchedCells(cells);
       events.emitScoreChanged(this._gameModel!.score);
     } finally {
@@ -241,10 +245,13 @@ export class GameBoardsViewController extends GridsViewController {
       release();
     }
 
+    // Gravity and refill are applied to the model back to back, then animated
+    // together: the surviving gems slide down while the new ones enter from above,
+    // so a column always moves as one stack. Awaiting the fall before spawning made
+    // the board visibly wait with a gap at the top before anything came in.
     const moves = svc.applyGravity(cols);
-    await view.animateGravityMoves(gridId, moves);
     const spawns = svc.refillEmpty(cols);
-    await view.animateRefillSpawns(gridId, spawns);
+    await Promise.all([view.animateGravityMoves(gridId, moves), view.animateRefillSpawns(gridId, spawns)]);
     events.emitScoreChanged(this._gameModel!.score);
 
     this._settle(gridId);
