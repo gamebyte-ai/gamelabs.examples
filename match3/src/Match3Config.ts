@@ -7,6 +7,15 @@ export class Match3Config {
   public static readonly GRID_ID = 1;
   /** Shared by Three.js gems and tuning (`gemTypeCount` should not exceed palette length). */
   public static readonly GEM_PALETTE: readonly number[] = [0xe11d48, 0x3b82f6, 0x22c55e, 0xeab308, 0xa855f7];
+  /**
+   * Draw a plane under each cell. Off by default for the flat board look (scene
+   * backdrop + one outline around the whole grid); turn it on to see the
+   * framework's `GridCellObject.createVisual()` path in action.
+   *
+   * Static, not an instance field, because the grid module builds cell objects
+   * without DI access — which also means it canNOT come from `game-config.json`.
+   */
+  public static readonly SHOW_CELL_PLANES = false;
   public readonly rows = 8;
   public readonly cols = 8;
   public readonly gemTypeCount = 5;
