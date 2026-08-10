@@ -1,5 +1,7 @@
 import type { IGridView } from "@gamebyte/gamelabsjs";
-import type { GravityMove, RefillSpawn } from "../../../utilities/GameOperations.js";
+
+/** A gem's world position, captured before the grid rebuilt its object. */
+export type GemPosition = { x: number; y: number; z: number };
 
 export interface IGameBoardsView extends IGridView {
   /** The `PointerEvent` is forwarded so the controller can tell a swipe from a tap. */
@@ -7,7 +9,14 @@ export interface IGameBoardsView extends IGridView {
   updateGemSelection(gridId: number, selected: { col: number; row: number } | null): void;
   animateInvalidSwap(gridId: number, r1: number, c1: number, r2: number, c2: number): Promise<void>;
   animateValidSwap(gridId: number, r1: number, c1: number, r2: number, c2: number): Promise<void>;
-  animateClearMatches(gridId: number, matches: { row: number; col: number }[]): Promise<void>;
-  animateGravityMoves(gridId: number, moves: GravityMove[]): Promise<void>;
-  animateRefillSpawns(gridId: number, spawns: RefillSpawn[]): Promise<void>;
+  /** `wave` staggers the clear: 0 is the match itself, higher values are further along a sweep. */
+  animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[]): Promise<void>;
+  /**
+   * Where each gem in `cols` is right now, keyed by item id. Read it BEFORE the model
+   * moves anything — the grid rebuilds a gem's object on every cell change, and the
+   * item id is all that survives.
+   */
+  captureGemPositions(gridId: number, cols: ReadonlySet<number>): Map<number, GemPosition>;
+  /** Flies every gem in `cols` to its current cell, from wherever it actually is. */
+  reconcileColumns(gridId: number, cols: ReadonlySet<number>, captured: Map<number, GemPosition>): Promise<void>;
 }

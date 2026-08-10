@@ -3,6 +3,8 @@ import gsap from "gsap";
 import type { IAssetManager, IWorldPointerInput, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridItemObject, type IGridObjectListener } from "@gamebyte/gamelabsjs";
 import { GEM_ASSET_IDS_BY_TYPE } from "../../../Match3AssetIds.js";
+import { GemSpecial } from "../models/GameBoardItem.js";
+import { Match3Config } from "../../../Match3Config.js";
 import type { GameBoardItemObjectOptions } from "./GameBoardItemObjectOptions.js";
 
 /**
@@ -34,12 +36,51 @@ function shadowTexture(softness: number): THREE.Texture {
   return texture;
 }
 
+/**
+ * The cookie face: a disc split into one wedge per gem colour, drawn once and shared.
+ * Built from the palette so it always shows the colours actually in play.
+ */
+let COOKIE_TEXTURE: THREE.Texture | null = null;
+
+function cookieTexture(colors: readonly number[]): THREE.Texture {
+  if (COOKIE_TEXTURE) return COOKIE_TEXTURE;
+
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const r = size / 2;
+  const slice = (Math.PI * 2) / Math.max(1, colors.length);
+
+  for (let i = 0; i < colors.length; i++) {
+    ctx.beginPath();
+    ctx.moveTo(r, r);
+    ctx.arc(r, r, r * 0.94, i * slice - Math.PI / 2, (i + 1) * slice - Math.PI / 2);
+    ctx.closePath();
+    ctx.fillStyle = `#${colors[i].toString(16).padStart(6, "0")}`;
+    ctx.fill();
+  }
+
+  // A dark rim reads as an edge against any board colour.
+  ctx.beginPath();
+  ctx.arc(r, r, r * 0.94, 0, Math.PI * 2);
+  ctx.lineWidth = size * 0.05;
+  ctx.strokeStyle = "rgba(15,23,42,0.85)";
+  ctx.stroke();
+
+  COOKIE_TEXTURE = new THREE.CanvasTexture(canvas);
+  return COOKIE_TEXTURE;
+}
+
 export class GameBoardItemObject extends GridItemObject {
   private static readonly SELECTION_ACCENT = 0xfbbf24;
   private static readonly SELECTION_SCALE = 1.1;
   private static readonly QUAD_Y = 0.06;
   /** Below the gem quad, above the board outline (`0.02`) and backdrop (`0.03`). */
   private static readonly SHADOW_Y = 0.045;
+  /** Just above the gem quad so the marks read over the gem art. */
+  private static readonly STRIPE_Y = 0.065;
 
   public declare readonly preset: RectGridPreset;
 
@@ -76,9 +117,17 @@ export class GameBoardItemObject extends GridItemObject {
       this._shadow = shadow;
     }
 
-    // Gem texture quad
+    const isCookie = options.special === GemSpecial.ColorBomb;
+    // Stripes describe a sweep direction; a cookie has none, its face says what it is.
+    if (!isCookie) this._createStripes(options, size);
+
+    // Gem texture quad — or the cookie face, which is generated rather than loaded.
     const assetId = GEM_ASSET_IDS_BY_TYPE[gemType % GEM_ASSET_IDS_BY_TYPE.length];
-    const texture = assetId ? this._assetManager?.getAsset<THREE.Texture>(assetId) ?? null : null;
+    const texture = isCookie
+      ? cookieTexture(Match3Config.GEM_PALETTE)
+      : assetId
+        ? this._assetManager?.getAsset<THREE.Texture>(assetId) ?? null
+        : null;
 
     const geom = new THREE.PlaneGeometry(size, size);
     const mat = new THREE.MeshBasicMaterial({
@@ -111,6 +160,43 @@ export class GameBoardItemObject extends GridItemObject {
     halo.renderOrder = 99;
     this.add(halo);
     this._selectionHalo = halo;
+  }
+
+  /**
+   * Two bars across the gem showing which way a striped gem will sweep when cleared.
+   * Drawn ABOVE the gem quad so they stay readable over any gem art, and parented to
+   * the gem so they travel, grow and pop with it.
+   */
+  private _createStripes(options: GameBoardItemObjectOptions, size: number): void {
+    const special = options.special;
+    if (special === GemSpecial.None) return;
+
+    const stripe = options.stripe;
+    const alongRow = special === GemSpecial.StripedRow;
+    const thickness = size * stripe.stripeThickness;
+    const material = new THREE.MeshBasicMaterial({
+      color: stripe.stripeColor,
+      transparent: true,
+      opacity: stripe.stripeOpacity,
+      depthWrite: false
+    });
+
+    for (const sign of [-1, 1]) {
+      const offset = size * stripe.stripeGap * 0.5 * sign;
+      const bar = new THREE.Mesh(
+        // Bars run the full width of the gem along the sweep axis.
+        alongRow ? new THREE.PlaneGeometry(size, thickness) : new THREE.PlaneGeometry(thickness, size),
+        material
+      );
+      bar.rotation.x = -Math.PI / 2;
+      bar.position.set(alongRow ? 0 : offset, GameBoardItemObject.STRIPE_Y, alongRow ? offset : 0);
+      this.add(bar);
+    }
+  }
+
+  /** The gem's colour index, for effects that need to match it (the pop burst). */
+  public get gemType(): number {
+    return (this._options as GameBoardItemObjectOptions).gemType;
   }
 
   public setHighlighted(on: boolean): void {

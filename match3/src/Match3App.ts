@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { vector } from "@js-basics/vector";
-import { AssetTypes, GamelabsApp, GameCameraBinding, GameCameraManager, GridsModel, LogTypes, Topdown2dCameraController, UIComponentsBinding, UIEvents, SettingsBinding, SettingsBooleanField, SettingsNumberField, SettingsManager } from "@gamebyte/gamelabsjs";
+import { AssetTypes, GamelabsApp, GameCameraBinding, GameCameraManager, GridsModel, LogTypes, ParticleManager, ParticlesBinding, TimelineBinding, TimelineManager, Topdown2dCameraController, UIComponentsBinding, UIEvents, SettingsBinding, SettingsBooleanField, SettingsNumberField, SettingsManager } from "@gamebyte/gamelabsjs";
 import { Match3AssetIds } from "./Match3AssetIds.js";
 import { Match3Config } from "./Match3Config.js";
 import { Match3GameGridBinding } from "./modules/gamegrid/Match3GameGridBinding.js";
@@ -22,6 +22,9 @@ export class Match3App extends GamelabsApp {
   private readonly _gameEvents = new GameEvents();
   private _cameraController: Topdown2dCameraController | null = null;
   private _cameraManager: GameCameraManager | null = null;
+  private _boardView: GameBoardsView | null = null;
+  private _particles: ParticleManager | null = null;
+  private _timeline: TimelineManager | null = null;
 
   public constructor(stageEl: HTMLElement) {
     // Built before super() so the viewport can read the aspect from the config:
@@ -40,6 +43,12 @@ export class Match3App extends GamelabsApp {
   }
 
   protected override registerModules(): void {
+    // Particles: pop bursts go through the framework's pooled emitter rather than
+    // ad-hoc meshes, so the board shares one budget however busy a cascade gets.
+    this.addModule(new ParticlesBinding(this._config.popParticles.budget));
+    // Timeline: camera shake and anything else time-boxed runs as tracks the framework
+    // ticks and cancels, rather than ad-hoc timers scattered through the board code.
+    this.addModule(new TimelineBinding());
     this.addModule(this._gameCameraBinding);
     this.addModule(this._gameGridBinding);
     this.addModule(this._settingsBinding);
@@ -65,7 +74,7 @@ export class Match3App extends GamelabsApp {
     this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxSelect, new URL("../assets/sfx_select.wav", import.meta.url).href);
     this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxSwap, new URL("../assets/sfx_swap.wav", import.meta.url).href);
     this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxWrong, new URL("../assets/sfx_wrong.wav", import.meta.url).href);
-    this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxPop, new URL("../assets/sfx_pop.wav", import.meta.url).href);
+    this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxPop, new URL("../assets/sfx_pop.mp3", import.meta.url).href);
     this.assetManager.load(AssetTypes.Audio, Match3AssetIds.MusicBg, new URL("../assets/music_bg.wav", import.meta.url).href);
   }
 
@@ -105,7 +114,7 @@ export class Match3App extends GamelabsApp {
     // anyway, the outline sitting exactly on the boundary.
     const halfW = this._config.boardWidth * 0.5;
     const halfD = this._config.boardDepth * 0.5;
-    this.world.renderer.clippingPlanes = [
+    this.world.renderer.clippingPlanes = !this._config.clipToBoard ? [] : [
       new THREE.Plane(new THREE.Vector3(1, 0, 0), halfW),
       new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfW),
       new THREE.Plane(new THREE.Vector3(0, 0, 1), halfD),
@@ -113,13 +122,24 @@ export class Match3App extends GamelabsApp {
     ];
 
     this.diContainer.getInstance(UIEvents).createScreen(Match3UIIds.GameScreen, this._config.transitions.gameScreenEnter);
-    this.world.addRootView(this.viewFactory.createView(GameBoardsView));
+    this._boardView = this.viewFactory.createView(GameBoardsView);
+    this.world.addRootView(this._boardView);
+    // The view owns the emitter; the manager lives here, so registration happens here.
+    const popEmitter = this._boardView.popEmitter;
+    if (popEmitter) this.diContainer.getInstance(ParticleManager).register(popEmitter);
 
     const grid = this.diContainer.getInstance(GridsModel).getGrid(Match3Config.GRID_ID);
     if (grid) {
+      // `getCenterOffset` centres ALL rows, reserve included, which would frame the
+      // middle of the stack. Shift up by half the reserve so the camera sits on the
+      // playable window instead, with the reserve stacked out of frame above it.
       const offset = grid.getCenterOffset();
-      grid.setPosition(vector(-offset.x, -offset.y, -offset.z));
+      const toPlayable = (this._config.reserveRows / 2) * this._config.gridRowSize;
+      grid.setPosition(vector(-offset.x, -offset.y, -offset.z - toPlayable));
     }
+    // The module registers the manager; nothing ticks it for us, so the app does.
+    this._particles = this.diContainer.getInstance(ParticleManager);
+    this._timeline = this.diContainer.getInstance(TimelineManager);
     this._cameraManager = this.diContainer.getInstance(GameCameraManager);
     this._cameraManager.initialize(this.world);
     this._cameraController = new Topdown2dCameraController(this._cameraManager).register();
@@ -146,15 +166,25 @@ export class Match3App extends GamelabsApp {
     const c = this._config.camera;
     const span = c.maxAspect - c.minAspect;
     const t = span > 0 ? Math.max(0, Math.min(1, (width / height - c.minAspect) / span)) : 0;
-    this._cameraManager.setOrthoSize(c.orthoAtMin + (c.orthoAtMax - c.orthoAtMin) * t);
+    // Scaled by this level's board size, so every level frames the same way.
+    const ortho = c.orthoAtMin + (c.orthoAtMax - c.orthoAtMin) * t;
+    this._cameraManager.setOrthoSize(ortho * this._config.cameraBoardScale);
   }
 
   protected override onStep(timestepSeconds: number): void {
     super.onStep(timestepSeconds);
     this._cameraManager?.update(timestepSeconds);
+    this._particles?.update(timestepSeconds);
+    this._timeline?.update(timestepSeconds);
+    // Gem falls are integrated per frame rather than tweened, so that a gem retargeted
+    // mid-fall keeps its speed instead of restarting from zero.
+    this._boardView?.stepFalls(timestepSeconds);
   }
 
   protected override preDestroy(): void {
+    this._boardView = null;
+    this._particles = null;
+    this._timeline = null;
     this._cameraController = null;
     super.preDestroy();
   }
