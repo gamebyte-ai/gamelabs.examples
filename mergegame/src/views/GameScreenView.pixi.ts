@@ -21,7 +21,7 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
 
   public override postInitialize(): void {
     super.postInitialize();
-    this._level.anchor.set(0.5, 0);
+    this._level.anchor.set(0, 0); // top-left corner
     this.addChild(this._level);
   }
 
@@ -31,6 +31,6 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
 
   public override onResize(width: number, height: number, dpr: number): void {
     super.onResize(width, height, dpr);
-    this._level.position.set(Math.max(1, width) / 2, 24);
+    this._level.position.set(18, 16);
   }
 }

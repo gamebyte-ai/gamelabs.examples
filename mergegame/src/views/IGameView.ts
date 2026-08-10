@@ -14,4 +14,7 @@ export interface IGameView extends IView, IMergePresenter {
 
   /** Fires on release with the launch origin in GAME-space coordinates. */
   onLaunch(cb: (gx: number, gy: number) => void): Unsubscribe;
+
+  /** Fires when the "Play Again" button is pressed on the completion overlay. */
+  onReplay(cb: () => void): Unsubscribe;
 }

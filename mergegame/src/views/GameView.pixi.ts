@@ -97,6 +97,41 @@ export class GameView extends HudViewBase implements IGameView {
   private _failShown = false;
   private _failT = 0; // scale-up + fade-in progress (0 → 1)
 
+  // Goals: top row of icon+count, the produced-item collect flights, and the
+  // "AWESOME" + Play Again completion overlay.
+  private readonly _goalRow = new PIXI.Container();
+  private readonly _collectLayer = new PIXI.Container(); // collect silhouettes — ABOVE the goal panels
+  private _goalRecs: {
+    tier: number;
+    cell: PIXI.Container; // the whole card (scaled for the landing pop)
+    bg: PIXI.Graphics;
+    icon: PIXI.Graphics; // flat (unshaded) circle in the kind's color
+    count: PIXI.Text;
+    check: PIXI.Text;
+    x: number; // absolute icon-center (collect target)
+    y: number;
+    done: boolean;
+    popT: number; // landing-pop elapsed (>= popTime = idle at scale 1)
+  }[] = [];
+  private readonly _collects: {
+    g: PIXI.Graphics; // flat item-silhouette flying to the goal
+    sx: number;
+    sy: number;
+    tx: number;
+    ty: number;
+    ss: number;
+    e: number;
+    goalIndex: number;
+    remaining: number;
+  }[] = [];
+  private _overlay!: PIXI.Container;
+  private _awesomeText!: PIXI.Text;
+  private _replayBtn!: PIXI.Container;
+  private _completeShown = false; // overlay is up
+  private _completePending = false; // waiting for the last collect to land before revealing
+  private _completeReveal = 0; // overlay scale-up + fade-in progress (0 → 1)
+  private readonly _replaySubs = new Set<() => void>();
+
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
     this._config = resolver.getInstance(MergeGameConfig);
@@ -137,6 +172,8 @@ export class GameView extends HudViewBase implements IGameView {
     this._failText.visible = false;
     this._failText.position.set(this._geo!.centerX, (this._geo!.topY + this._geo!.bottomY) / 2);
 
+    this._buildOverlay();
+
     // Background fills the whole CANVAS (behind the design-space root), so any
     // margin left inside the aspect band shows the game backdrop, not the page.
     this.addChild(this._bg);
@@ -152,8 +189,12 @@ export class GameView extends HudViewBase implements IGameView {
       this._colliders,
       this._launcher,
       this._fx,
+      this._goalRow, // top goal icons + counts
+      this._collectLayer, // silhouettes fly ABOVE the goal panels
       this._failText,
+      this._overlay, // completion overlay on top of everything
     );
+    this._collectLayer.eventMode = "none";
     this.addChild(this._root);
 
     // Star burst emitter (framework HudParticleEmitter) lives in the fx layer.
@@ -234,6 +275,109 @@ export class GameView extends HudViewBase implements IGameView {
     this._failShown = over;
   }
 
+  //  PRESENTER — goals row, collect flights, completion overlay
+
+  public setGoals(goals: { tier: number; count: number }[]): void {
+    const cfg = this._cfg();
+    const geo = this._geo!;
+    for (const rec of this._goalRecs) rec.cell.destroy({ children: true });
+    this._goalRecs = [];
+    this._goalRow.removeChildren();
+    if (goals.length === 0) return;
+    const g = cfg.goals;
+    const startX = geo.centerX - ((goals.length - 1) * g.gap) / 2;
+    for (let i = 0; i < goals.length; i++) {
+      const goal = goals[i];
+      const cx = startX + i * g.gap; // panel center X
+      const cy = g.rowY; // panel center Y
+      // The card is a container at the panel center; children are laid out relative
+      // to (0,0) so the whole card can be scaled around its center for the pop.
+      const cell = new PIXI.Container();
+      cell.eventMode = "none";
+      cell.position.set(cx, cy);
+      // Rounded-rect panel that holds the icon + the count.
+      const bg = new PIXI.Graphics();
+      bg.eventMode = "none";
+      bg.roundRect(-g.panelW / 2, -g.panelH / 2, g.panelW, g.panelH, g.panelCorner).fill({ color: g.iconBg });
+      bg.stroke({ width: g.iconBgStrokeWidth, color: g.iconBgStroke });
+      // Flat (unshaded) icon — a plain filled circle in the kind's color.
+      const kind = cfg.item.kinds[goal.tier] ?? cfg.item.kinds[0];
+      const icon = new PIXI.Graphics();
+      icon.eventMode = "none";
+      icon.circle(0, g.iconDy, g.iconRadius).fill({ color: kind.color });
+      const count = new PIXI.Text({
+        text: String(goal.count),
+        style: {
+          fill: g.countColor,
+          fontSize: g.countSize,
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+          fontWeight: "800",
+        },
+      });
+      count.anchor.set(0.5);
+      count.eventMode = "none";
+      count.position.set(0, g.countDy);
+      // Completion tick — hidden until the goal is met (over the icon).
+      const check = new PIXI.Text({
+        text: "✓",
+        style: {
+          fill: g.checkColor,
+          fontSize: g.iconRadius * 1.7,
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+          fontWeight: "900",
+        },
+      });
+      check.anchor.set(0.5);
+      check.eventMode = "none";
+      check.position.set(0, g.iconDy);
+      check.visible = false;
+      cell.addChild(bg, icon, count, check);
+      this._goalRow.addChild(cell);
+      // Absolute icon center = collect target (goalRow is at the root origin).
+      this._goalRecs.push({ tier: goal.tier, cell, bg, icon, count, check, x: cx, y: cy + g.iconDy, done: false, popT: g.popTime });
+    }
+  }
+
+  public collectGoal(goalIndex: number, gx: number, gy: number, remaining: number): void {
+    const rec = this._goalRecs[goalIndex];
+    if (!rec) return;
+    const cfg = this._cfg();
+    const kind = cfg.item.kinds[rec.tier] ?? cfg.item.kinds[0];
+    const p = this._geo!.project(gx, gy);
+    // A translucent flat silhouette (unit circle scaled by radius) — a ghost copy
+    // of the produced item that floats up to the goal icon. The real item stays on
+    // the board (spawned by operations); this is pure feedback.
+    const ss = cfg.item.radius * this._itemScale(rec.tier) * p.scale; // produced-size radius (px)
+    const g = new PIXI.Graphics();
+    g.circle(0, 0, 1).fill({ color: kind.color });
+    g.eventMode = "none";
+    g.alpha = cfg.goals.collectAlpha;
+    g.position.set(p.x, p.y);
+    g.scale.set(ss);
+    this._collectLayer.addChild(g); // renders on top of the goal panels
+    this._collects.push({ g, sx: p.x, sy: p.y, tx: rec.x, ty: rec.y, ss, e: 0, goalIndex, remaining });
+  }
+
+  public setComplete(complete: boolean): void {
+    if (complete) {
+      // Defer the banner until the last collect flight has landed on its icon.
+      this._completePending = true;
+      return;
+    }
+    this._completePending = false;
+    this._completeShown = false;
+    this._completeReveal = 0;
+    this._overlay.visible = false;
+    this._overlay.alpha = 0;
+    for (const c of this._collects) c.g.destroy();
+    this._collects.length = 0;
+  }
+
+  public onReplay(cb: () => void): Unsubscribe {
+    this._replaySubs.add(cb);
+    return () => this._replaySubs.delete(cb);
+  }
+
   public playMerge(kindIdx: number, ax: number, ay: number, bx: number, by: number): void {
     const pa = this._geo!.project(ax, ay);
     const pb = this._geo!.project(bx, by);
@@ -285,6 +429,22 @@ export class GameView extends HudViewBase implements IGameView {
     this._tickEffects(dt);
     this._stars?.update(dt);
     this._tickFail(dt);
+    this._tickCollects(dt);
+    this._tickGoalPops(dt);
+    this._tickComplete(dt);
+  }
+
+  /** One-shot up-down scale pop on a goal card when a collect lands on it. */
+  private _tickGoalPops(dt: number): void {
+    const g = this._cfg().goals;
+    const dur = Math.max(0.0001, g.popTime);
+    for (const rec of this._goalRecs) {
+      if (rec.popT >= dur) continue; // idle
+      rec.popT += dt;
+      const t = Math.min(1, rec.popT / dur);
+      rec.cell.scale.set(1 + g.popAmp * Math.sin(t * Math.PI)); // 1 → 1+amp → 1
+      if (rec.popT >= dur) rec.cell.scale.set(1);
+    }
   }
 
   /** Scale-up + fade-in the FAIL banner while game over is shown. */
@@ -298,6 +458,111 @@ export class GameView extends HudViewBase implements IGameView {
     if (this._failT < 1) this._failT = Math.min(1, this._failT + dt / Math.max(0.0001, f.inTime));
     this._failText.alpha = this._failT;
     this._failText.scale.set(f.fromScale + (1 - f.fromScale) * GameView._popEase(this._failT));
+  }
+
+  /** Build the completion overlay: a dim panel, the "AWESOME" banner, and the
+   * Play Again button (design-space, fixed size). Hidden until the level is done. */
+  private _buildOverlay(): void {
+    const cfg = this._cfg();
+    const g = cfg.goals;
+    const geo = this._geo!;
+    this._overlay = new PIXI.Container();
+    this._overlay.visible = false;
+    this._overlay.alpha = 0;
+
+    const dim = new PIXI.Graphics();
+    dim.rect(0, 0, geo.designW, geo.designH).fill({ color: 0x0a1020, alpha: 0.62 });
+    dim.eventMode = "static"; // swallow taps behind the overlay
+
+    this._awesomeText = new PIXI.Text({
+      text: g.completeText,
+      style: {
+        fill: g.completeColor,
+        fontSize: g.completeSize,
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+        fontWeight: "800",
+      },
+    });
+    this._awesomeText.anchor.set(0.5);
+    this._awesomeText.eventMode = "none";
+    this._awesomeText.position.set(geo.centerX, geo.designH * 0.42);
+
+    // Play Again button: rounded rect sized to its label + padding, centered.
+    this._replayBtn = new PIXI.Container();
+    this._replayBtn.eventMode = "static";
+    this._replayBtn.cursor = "pointer";
+    const label = new PIXI.Text({
+      text: g.replayText,
+      style: {
+        fill: g.replayColor,
+        fontSize: 30,
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
+        fontWeight: "700",
+      },
+    });
+    label.anchor.set(0.5);
+    label.eventMode = "none";
+    const padX = 40;
+    const padY = 22;
+    const bw = label.width + padX * 2;
+    const bh = label.height + padY * 2;
+    const bg = new PIXI.Graphics();
+    bg.roundRect(-bw / 2, -bh / 2, bw, bh, 16).fill({ color: g.replayBg });
+    this._replayBtn.addChild(bg, label);
+    this._replayBtn.position.set(geo.centerX, this._awesomeText.y + g.completeSize * 0.9 + 60);
+    this._replayBtn.on("pointertap", () => {
+      for (const cb of this._replaySubs) cb();
+    });
+
+    this._overlay.addChild(dim, this._awesomeText, this._replayBtn);
+  }
+
+  /** Fly each produced goal item from where it was made up to its goal icon,
+   * updating the icon's count when it lands. */
+  private _tickCollects(dt: number): void {
+    const ft = Math.max(0.0001, this._cfg().goals.flyTime);
+    for (let i = this._collects.length - 1; i >= 0; i--) {
+      const c = this._collects[i];
+      c.e += dt;
+      const t = Math.min(1, c.e / ft);
+      const te = 1 - (1 - t) * (1 - t) * (1 - t); // ease-out cubic: starts fast, ends slow
+      const targetScale = this._cfg().goals.iconRadius; // unit-circle → radius in px
+      c.g.position.set(c.sx + (c.tx - c.sx) * te, c.sy + (c.ty - c.sy) * te);
+      c.g.scale.set(c.ss + (targetScale - c.ss) * te);
+      if (t >= 1) {
+        c.g.destroy();
+        this._collects.splice(i, 1);
+        const rec = this._goalRecs[c.goalIndex];
+        if (!rec) continue;
+        rec.popT = 0; // pop the goal card once on landing
+        if (c.remaining > 0) {
+          rec.count.text = String(c.remaining);
+        } else if (!rec.done) {
+          // Goal met: fade the panel/icon/count and stamp the tick.
+          rec.done = true;
+          const a = this._cfg().goals.doneAlpha;
+          rec.bg.alpha = a;
+          rec.icon.alpha = a;
+          rec.count.visible = false;
+          rec.check.visible = true;
+        }
+      }
+    }
+  }
+
+  /** Reveal + tween the completion overlay once the last collect flight lands. */
+  private _tickComplete(dt: number): void {
+    if (this._completePending && this._collects.length === 0) {
+      this._completePending = false;
+      this._completeShown = true;
+      this._completeReveal = 0;
+      this._overlay.visible = true;
+    }
+    if (!this._completeShown) return;
+    if (this._completeReveal < 1)
+      this._completeReveal = Math.min(1, this._completeReveal + dt / Math.max(0.0001, this._cfg().goals.inTime));
+    this._overlay.alpha = this._completeReveal;
+    this._awesomeText.scale.set(0.4 + 0.6 * GameView._popEase(this._completeReveal));
   }
 
   /** Project each stage-driven item onto the board (+ its pop-in scale-up). */
@@ -661,6 +926,11 @@ export class GameView extends HudViewBase implements IGameView {
     this.off("pointerup", this._onPointerUp, this);
     this.off("pointerupoutside", this._onPointerUp, this);
     this._launchSubs.clear();
+    this._replaySubs.clear();
+    for (const c of this._collects) c.g.destroy();
+    this._collects.length = 0;
+    for (const rec of this._goalRecs) rec.cell.destroy({ children: true });
+    this._goalRecs = [];
     for (const rec of this._flightRecs) rec.g.destroy();
     this._flightRecs.clear();
     for (const anim of this._mergeAnims) for (const part of anim.parts) part.g.destroy();

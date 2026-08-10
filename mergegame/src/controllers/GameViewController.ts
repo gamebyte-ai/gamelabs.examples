@@ -28,6 +28,8 @@ export class GameViewController implements IViewController<IGameView> {
 
     this._ops!.bindView(view);
     this._subs.add(view.onLaunch((gx, gy) => this._ops!.launch(gx, gy)));
+    // "Play Again" on the completion overlay rebuilds the level.
+    this._subs.add(view.onReplay(() => this._ops!.reset()));
 
     // Operations runs first (steps rules + syncs bodies into the view), then the
     // view advances its own visual tweens on the freshly-synced poses.

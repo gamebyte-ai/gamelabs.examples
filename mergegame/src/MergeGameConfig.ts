@@ -60,6 +60,40 @@ export class MergeGameConfig {
     fromScale: 0.4, // starting scale (pops up to 1)
   };
 
+  /** Goals shown at the top: each is "produce N of a tier". Producing that tier
+   * flies the item up to its goal icon (collect) and drops the count; when all
+   * hit 0 the level is complete. Per-level goals live on `levels.defs[].goals`. */
+  public readonly goals = {
+    rowY: 84, // panel center Y for the goal row (design)
+    gap: 84, // horizontal spacing between goal panels
+    // Rounded-rect panel that holds BOTH the item icon and its count.
+    panelW: 62, // panel width (design px)
+    panelH: 90, // panel height (design px)
+    panelCorner: 16, // panel corner radius
+    iconBg: 0x223250,
+    iconBgStroke: 0x3f5a86,
+    iconBgStrokeWidth: 3,
+    iconRadius: 22, // goal icon size (design px)
+    iconDy: -16, // icon center offset from the panel center (up)
+    countDy: 26, // count center offset from the panel center (down)
+    doneAlpha: 0.4, // completed goal fades to this
+    checkColor: 0x5bd670, // completion tick color
+    countColor: 0xe8eef6,
+    countSize: 22,
+    flyTime: 0.5, // collect silhouette fly-to-goal duration, seconds
+    collectAlpha: 0.85, // opacity of the flying item-silhouette (the real item stays on the board)
+    popAmp: 0.22, // goal card scale-up amount on a collect landing
+    popTime: 0.28, // goal card up-down pop duration, seconds
+    // Completion overlay:
+    completeText: "AWESOME!",
+    completeColor: 0xffe14a,
+    completeSize: 68,
+    inTime: 0.4, // banner scale-up + fade-in
+    replayText: "Tekrar Oyna",
+    replayColor: 0xffffff,
+    replayBg: 0x2e7d32,
+  };
+
   /** The item's appearance. Each launch randomly picks one of `kinds`; two items
    * of the SAME kind merge on contact. */
   public readonly item = {
@@ -78,14 +112,14 @@ export class MergeGameConfig {
     // ones) falls back to the engine default when omitted.
     kinds: [
       { shape: "circle", color: 0xffcf3f, scale: 0.9, weight: 55, unlockAtMax: 0, restitution: 0.07, friction: 0.9, frictionAir: 0.04 },
-      { shape: "circle", color: 0x4aa3ff, scale: 1.4, weight: 40, unlockAtMax: 0, restitution: 0.09, friction: 0.7, frictionAir: 0.04 },
-      { shape: "circle", color: 0x5bd670, scale: 2.2, weight: 8, unlockAtMax: 2, restitution: 0.09, friction: 0.7, frictionAir: 0.04 },
-      { shape: "circle", color: 0xff6f61, scale: 2.8, weight: 3, unlockAtMax: 3, restitution: 0.09, friction: 0.7, frictionAir: 0.045 },
-      { shape: "circle", color: 0x9b5cf0, scale: 3.4, weight: 8, unlockAtMax: 4, restitution: 0.09, friction: 0.7, frictionAir: 0.045 },
-      { shape: "circle", color: 0xff934a, scale: 4.0, weight: 5, unlockAtMax: 5, restitution: 0.09, friction: 0.7, frictionAir: 0.049 },
-      { shape: "circle", color: 0xff5fa2, scale: 4.6, weight: 0, unlockAtMax: 6, restitution: 0.09, friction: 0.7, frictionAir: 0.05 },
-      { shape: "circle", color: 0x2fd0c0, scale: 5.2, weight: 0, unlockAtMax: 7, restitution: 0.09, friction: 0.7, frictionAir: 0.05 },
-      { shape: "circle", color: 0xd94f6a, scale: 5.8, weight: 0, unlockAtMax: 8, restitution: 0.09, friction: 0.7, frictionAir: 0.052 },
+      { shape: "circle", color: 0x4aa3ff, scale: 1.5, weight: 40, unlockAtMax: 0, restitution: 0.09, friction: 0.7, frictionAir: 0.04 },
+      { shape: "circle", color: 0x5bd670, scale: 2.4, weight: 8, unlockAtMax: 2, restitution: 0.09, friction: 0.7, frictionAir: 0.04 },
+      { shape: "circle", color: 0xff6f61, scale: 3, weight: 3, unlockAtMax: 3, restitution: 0.09, friction: 0.7, frictionAir: 0.045 },
+      { shape: "circle", color: 0x9b5cf0, scale: 3.6, weight: 8, unlockAtMax: 4, restitution: 0.09, friction: 0.7, frictionAir: 0.045 },
+      { shape: "circle", color: 0xff934a, scale: 4.4, weight: 5, unlockAtMax: 5, restitution: 0.09, friction: 0.7, frictionAir: 0.049 },
+      { shape: "circle", color: 0xff5fa2, scale: 5, weight: 0, unlockAtMax: 6, restitution: 0.09, friction: 0.7, frictionAir: 0.05 },
+      { shape: "circle", color: 0x2fd0c0, scale: 5.6, weight: 0, unlockAtMax: 7, restitution: 0.09, friction: 0.7, frictionAir: 0.05 },
+      { shape: "circle", color: 0xd94f6a, scale: 6.3, weight: 0, unlockAtMax: 8, restitution: 0.09, friction: 0.7, frictionAir: 0.052 },
     ] as {
       shape: "circle" | "square";
       color: number;
@@ -106,8 +140,20 @@ export class MergeGameConfig {
   public readonly levels = {
     start: 1, // 1-based level to start on
     defs: [
-      // Level 1 — empty board, only the base tiers launchable.
-      { maxTier: 0, balls: [] },
+      // Level 1 — starts with two "lvl 6" items (kind index 5); goal: produce one
+      // each of the top three tiers (the 7th, 8th and 9th items → indices 6, 7, 8).
+      {
+        maxTier: 0,
+        balls: [
+          { kind: 5, x: 0.3, y: 0.88 },
+          { kind: 5, x: 0.7, y: 0.88 },
+        ],
+        goals: [
+          { tier: 6, count: 1 },
+          { tier: 7, count: 1 },
+          { tier: 8, count: 1 },
+        ],
+      },
       // Level 2 — low-tier balls piled at the FAR end (top) of the play area;
       // tier-2 already unlocked.
       {
@@ -180,6 +226,7 @@ export class MergeGameConfig {
       fireKind?: number; // force the launched tier (test)
       fireAll?: boolean; // auto-fire picks a UNIFORMLY random tier among all kinds (test)
       fireInterval?: number; // per-level auto-fire interval (seconds); falls back to debug default
+      goals?: { tier: number; count: number }[]; // produce N of `tier` to complete the level
     }[],
   };
 

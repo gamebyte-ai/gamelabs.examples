@@ -35,6 +35,13 @@ export interface IMergePresenter {
   setLineState(state: LineState, proximity: number): void;
   /** Show/hide the "FAIL" game-over banner (scales up + fades in when shown). */
   setGameOver(over: boolean): void;
+  /** Set up the top goal row (one icon + count per goal), or clear it (empty array). */
+  setGoals(goals: { tier: number; count: number }[]): void;
+  /** A goal item (of `goalIndex`'s tier) was produced at game-space (gx,gy): fly it
+   * up to the goal icon; on arrival show the new `remaining` count. */
+  collectGoal(goalIndex: number, gx: number, gy: number, remaining: number): void;
+  /** Show/hide the "AWESOME" + Play Again completion overlay. */
+  setComplete(complete: boolean): void;
 }
 
 /** Danger-line render state. */
@@ -102,6 +109,8 @@ export class MergeOperations {
   private _graceUsed = false; // a grace shot has been fired while the line is crossed
   private _gameOver = false;
   private _gameOverTimer = 0;
+  private _goals: { tier: number; remaining: number }[] = []; // per-level produce-N goals
+  private _complete = false; // all goals met — level done
 
   private readonly _t: Transform2D = { x: 0, y: 0, angle: 0 };
   private readonly _v: Vec2 = { x: 0, y: 0 };
@@ -134,11 +143,14 @@ export class MergeOperations {
     this._lastKind = -1;
     this._lastKindStreak = 0;
     this._autoFireTimer = 0;
+    this._complete = false;
+    this._goals.length = 0;
 
     this._buildWalls();
-    this._spawnStartingLevel();
+    this._spawnStartingLevel(); // also sets up the goal row
     this._presenter!.setLineState("safe", 0);
     this._presenter!.setGameOver(false);
+    this._presenter!.setComplete(false);
 
     // Load the first launcher item (pops it in).
     this._currentKindIdx = this._pickKind();
@@ -159,6 +171,10 @@ export class MergeOperations {
     this._fireKind = level?.fireKind ?? null;
     this._fireAll = level?.fireAll ?? false;
     this._fireInterval = level?.fireInterval ?? cfg.debug.autoFireInterval;
+    // Goals: produce-N-of-a-tier objectives shown in the top row.
+    const goals = level?.goals ?? [];
+    this._goals = goals.map((g) => ({ tier: g.tier, remaining: g.count }));
+    this._presenter!.setGoals(goals);
     if (!level) return;
     for (const b of level.balls) {
       if (b.kind < 0 || b.kind >= cfg.item.kinds.length) continue;
@@ -197,7 +213,7 @@ export class MergeOperations {
 
   /** Launch the current item from a game-space point toward the far edge. */
   public launch(gx: number, gy: number): void {
-    if (!this._ready || this._gameOver) return;
+    if (!this._ready || this._gameOver || this._complete) return;
     const cfg = this._config!;
 
     // Firing while the line is crossed = the ONE grace shot. If it doesn't clear
@@ -229,6 +245,13 @@ export class MergeOperations {
       this._gameOverTimer -= d;
       this._stage!.sync();
       if (this._gameOverTimer <= 0) this.reset();
+      return;
+    }
+
+    // Level complete: freeze play (no reload/launch/merge) until "Play Again".
+    // The view keeps animating the collect-flies + overlay via its own `tick`.
+    if (this._complete) {
+      this._stage!.sync();
       return;
     }
 
@@ -370,9 +393,32 @@ export class MergeOperations {
       this._pending.splice(i, 1);
       if (p.kindIdx > this._maxTier) this._maxTier = p.kindIdx; // unlock new launchable kinds
       // Merge products are ARMED at birth — they count for the line immediately,
-      // even when produced below it (they didn't launch up from the launcher).
+      // even when produced below it (they didn't launch up from the launcher). The
+      // real item ALWAYS stays on the board (it never leaves the play area).
       this._spawnFlying(p.kindIdx, p.gx, p.gy, 0, 0, true, true);
+      // If it satisfies a still-open goal, fly a SILHOUETTE up to the goal icon
+      // (pure feedback — the real item above stays in play) and drop the count.
+      const gi = this._goalIndexFor(p.kindIdx);
+      if (gi >= 0) {
+        const goal = this._goals[gi];
+        goal.remaining--;
+        this._presenter!.collectGoal(gi, p.gx, p.gy, goal.remaining);
+        if (this._goals.every((g) => g.remaining <= 0)) this._completeLevel();
+      }
     }
+  }
+
+  /** Index of the first still-open goal matching `tier`, or -1 if none. */
+  private _goalIndexFor(tier: number): number {
+    return this._goals.findIndex((g) => g.tier === tier && g.remaining > 0);
+  }
+
+  /** All goals met → freeze play and show the completion overlay. */
+  private _completeLevel(): void {
+    this._complete = true;
+    this._ready = false;
+    this._presenter!.hideLauncher();
+    this._presenter!.setComplete(true);
   }
 
   /** Proximity merge: two same-kind items whose SURFACES come within `merge.gap`
