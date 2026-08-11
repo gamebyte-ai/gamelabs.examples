@@ -16,7 +16,7 @@ export class Match3Config {
   /** Board setups; {@link level} picks one at boot. The grid is built once, from it. */
   public static readonly LEVELS: readonly { rows: number; cols: number; gemTypeCount: number; goal: number }[] = [
     { rows: 8, cols: 8, gemTypeCount: 4, goal: 60 },
-    { rows: 8, cols: 8, gemTypeCount: 3, goal: 40 }
+    { rows: 8, cols: 8, gemTypeCount: 4, goal: 40 }
   ];
 
   /** 1-based. An instance field so `game-config.json` can switch it; clamped in range. */
@@ -178,21 +178,92 @@ export class Match3Config {
     maxSteps: 8
   };
   /**
-   * Special gems. A run of at least `minRunLength` leaves a striped gem behind; when
-   * that gem is later cleared it sweeps its whole row or column, and anything the
-   * sweep catches resolves in the same pass (stripe chains included).
-   *
-   * `alongMatch` picks which way the stripe sweeps: `true` = the same axis the match
-   * ran on (a row of four leaves a gem that clears its row), `false` = across it.
-   * Two conventions exist in the genre and they feel quite different — kept as a
-   * flag so it can be decided by eye rather than by assertion.
+   * Shared pacing for a clear that is not a combination — an ordinary match, or a lone
+   * special going off. Each combination overrides it in {@link combos}.
    */
+  public readonly clear = {
+    /** Seconds between one step of a sweep and the next. 0 = the whole thing at once. */
+    stepSec: 0.06
+  };
   /**
-   * Booster 1, earned by an L/T match of `minCells`..`maxCells` gems. It appears at the
-   * junction the two runs share, and the clear collapses inward toward it. Cleared, it
-   * takes its 8 neighbours. Separate from {@link special} so each can be toggled alone.
+   * BOOSTER 1 — the stripe, earned by a straight run of `minRunLength`. Cleared, it
+   * sweeps its whole row or column, and whatever the sweep catches goes with it.
+   *
+   * `alongMatch` picks the axis: `true` = the same one the match ran on (a row of four
+   * leaves a gem that clears its row), `false` = across it. Both conventions exist in
+   * the genre and they feel quite different, so it is a flag rather than an assertion.
    */
-  public readonly booster = {
+  public readonly stripe = {
+    enabled: true,
+    minRunLength: 4,
+    alongMatch: true,
+    /** Stripe marks drawn over the gem, in gem-quad fractions. */
+    stripeColor: 0xffffff,
+    stripeOpacity: 0.85,
+    stripeThickness: 0.13,
+    stripeGap: 0.22,
+    /**
+     * The white shockwave it throws BOTH ways down its line when it fires. It carries
+     * on past the board and off the screen rather than stopping at the edge, which is
+     * what makes it read as a shockwave instead of a lit-up row.
+     */
+    wave: {
+      enabled: true,
+      color: 0xffffff,
+      opacity: 0.85,
+      /** Depth along the direction of travel, in cells. */
+      lengthCells: 0.35,
+      /** Width across the lane, in cells. 1 is exactly one cell wide. */
+      widthCells: 1,
+      /** Cells beyond the board's edge it keeps travelling before it is dropped. */
+      overshootCells: 10,
+      /** Only used when the clear is instant (`clear.stepSec: 0`) — see below. */
+      fallbackCellsPerSec: 26
+    }
+  };
+
+  /**
+   * Wave speed, DERIVED from the clear rather than set on its own: the sweep pops one
+   * cell every `clear.stepSec`, so a wave covering one cell in the same time arrives
+   * exactly as each gem goes. Retiming the clear retimes the wave with it, and the two
+   * can never drift into a wave that outruns the pops or trails them.
+   *
+   * An instant clear has no pace to follow, so it falls back to a fixed speed.
+   */
+  public get stripeWaveCellsPerSec(): number {
+    return this.clear.stepSec > 0 ? 1 / this.clear.stepSec : this.stripe.wave.fallbackCellsPerSec;
+  }
+  /**
+   * BOOSTER 2 — the cookie, earned by a straight run of `minRunLength` or more (7 in a
+   * row is the same as 5). It is colourless and cannot be matched. Swapped with a gem it
+   * takes that whole colour; set off any other way it picks a colour itself.
+   */
+  public readonly cookie = {
+    enabled: true,
+    minRunLength: 5,
+    /**
+     * The bolt it throws at every gem it is about to take. The gems pop ON IMPACT, so
+     * this is the wind-up, not decoration over the top of one. `strikeSec: 0` removes
+     * the effect entirely.
+     */
+    beam: {
+      strikeSec: 0.14,
+      /** How long the spent bolt lingers after impact. Runs after the gems are gone. */
+      fadeSec: 0.12,
+      color: 0x9be8ff,
+      /** Bolt width in world units. Each one varies a little around this. */
+      thickness: 0.06,
+      opacity: 0.9,
+      /** Opacity wobbles this many times on the way out — what reads as electric. */
+      flickers: 3
+    }
+  };
+  /**
+   * BOOSTER 3 — the bomb, earned by an L/T match of `minCells`..`maxCells` gems. It
+   * appears at the junction the two runs share, and the clear collapses inward toward
+   * it. Cleared, it takes its 8 neighbours.
+   */
+  public readonly bomb = {
     enabled: true,
     minCells: 5,
     maxCells: 6,
@@ -203,137 +274,77 @@ export class Match3Config {
     labelScale: 0.66,
     /**
      * Neighbours that must be filled before it goes off. 0 = never waits; 8 = holds for
-     * a full ring, pulsing until then. Clamped to the neighbours a cell actually has,
-     * so an edge (5) or corner (3) booster still fires.
+     * a full ring, pulsing until then. Clamped to the neighbours a cell actually has, so
+     * one against an edge (5) or in a corner (3) still fires.
      */
     minNeighbours: 0,
+    /**
+     * How many times ONE bomb goes off before it is used up. 1 is the plain behaviour;
+     * 2 means it takes its ring, survives, pulses white, and takes it again.
+     */
+    blasts: 2,
+    /** Between one blast and the next. It pulses for the whole of this. */
+    blastGapSec: 1.5,
     /** One pulse, in seconds: white and back. Lower is a more urgent flash. */
-    blinkStepSec: 0.2,
-    /**
-     * Two bombs swapped: instead of one taking its ring and the other going with it,
-     * they go off together over a square of this radius around the swap. 1 would be the
-     * ordinary 3x3 blast; 2 is 5x5, 3 is 7x7. Clipped at the board edge rather than
-     * shifted inward — a bomb in the corner takes the quarter it can reach.
-     */
-    pairRadius: 2,
-    /** Cookie + booster: gap between the converted boosters going off, in seconds. */
-    chainDelaySec: 0.18,
-    /** Pause after everything turns into a booster, before the first one goes off. */
-    chainStartDelaySec: 0.6
-  };
-  public readonly special = {
-    /** Booster 1 lives in `booster`; these two are the straight-run specials. */
-    stripesEnabled: true,
-    /**
-     * Booster 2 — the cookie, from a straight run of `minCookieRunLength`+. Swapped with
-     * a gem it clears that whole colour; set off any other way it takes one gem at
-     * random.
-     */
-    cookieEnabled: true,
-    minRunLength: 4,
-    /** Run length that earns a cookie instead of a stripe; anything longer is the same. */
-    minCookieRunLength: 5,
-    alongMatch: true,
-    /** Stripe marks drawn over the gem, in gem-quad fractions. */
-    stripeColor: 0xffffff,
-    stripeOpacity: 0.85,
-    stripeThickness: 0.13,
-    stripeGap: 0.22,
-    /** Seconds between steps of a sweep, so a line clears outward. 0 = all at once. */
-    sweepStepSec: 0.06
+    blinkStepSec: 0.2
   };
   /**
-   * The bolt a swapped cookie throws at every gem it is about to take. The gems pop on
-   * impact, so `strikeSec` delays the clear by exactly that much — it is the wind-up,
-   * not decoration over the top of it. `strikeSec: 0` removes the effect entirely.
-   */
-  public readonly cookieBeam = {
-    strikeSec: 0.14,
-    /** How long the spent bolt lingers after impact. Runs after the gems are gone. */
-    fadeSec: 0.12,
-    color: 0x9be8ff,
-    /** Bolt width in world units. Each one varies a little around this. */
-    thickness: 0.06,
-    opacity: 0.9,
-    /** Opacity wobbles this many times on the way out — what makes it read as electric. */
-    flickers: 3
-  };
-  /**
-   * The white wave a firing stripe throws BOTH ways down its line. It carries straight
-   * on past the board and off the screen rather than stopping at the edge, so it reads
-   * as a shockwave rather than a lit-up row. `speedCellsPerSec: 0` disables it.
-   */
-  public readonly stripeWave = {
-    enabled: true,
-    color: 0xffffff,
-    opacity: 0.85,
-    /** Depth along the direction of travel, in cells. */
-    lengthCells: 0.35,
-    /** Width across the lane, in cells. 1 is exactly one cell wide. */
-    widthCells: 1,
-    /** Cells beyond the board's edge it keeps travelling before it is dropped. */
-    overshootCells: 10,
-    /** Only used when the sweep is instant (`special.sweepStepSec: 0`) — see below. */
-    fallbackCellsPerSec: 26
-  };
-
-  /**
-   * Wave speed, DERIVED from the clear rather than set on its own: the sweep pops one
-   * cell every `special.sweepStepSec`, so a wave covering one cell in the same time
-   * arrives exactly as each gem goes. Tuning the sweep retimes the wave with it, and
-   * the two can never drift apart into a wave that outruns the pops or trails them.
+   * COMBINATIONS — what two boosters do when swapped with each other, one object each.
    *
-   * An instant sweep has no pace to follow, so it falls back to a fixed speed.
-   */
-  public get stripeWaveCellsPerSec(): number {
-    return this.special.sweepStepSec > 0 ? 1 / this.special.sweepStepSec : this.stripeWave.fallbackCellsPerSec;
-  }
-  /**
-   * Bomb + stripe: instead of both going off, they MERGE into a single item covering a
-   * `spanCells` × `spanCells` block at the swap. The old gems under it are gone and the
-   * block counts as filled — nothing falls into it or refills it while the item lives.
+   * Every one of them clears in steps and some throw bolts, so they share two fields:
    *
-   * Then its rows clear, all of them at once and end to end; `waveGapSec` later the item
-   * pops and its columns go with it; and once that wave is done the block is released
-   * and fills normally.
+   * - `stepSec` — between one step of that clear and the next. What a step IS differs:
+   *   a column for the cookie pair, a ring for the bomb pair, a shell of the cross for
+   *   the stripe pair.
+   * - `beamSec` — how long that combination's bolts fly. A fixed effect length: spent
+   *   once as a lead-in and never folded into `stepSec`, so making a clear quicker does
+   *   not make its bolts quicker.
    *
-   * `spanCells` is the mechanic, not a look: 3 means a 3x3 block, three rows and three
-   * columns. Even numbers have no centre cell, so keep it odd.
-   */
-  public readonly giant = {
-    enabled: true,
-    spanCells: 3,
-    /** Between the row wave and the column wave, which the item pops along with. */
-    waveGapSec: 0,
-    /** After the last wave, before the empty block is let go and refills. */
-    endHoldSec: 0
-  };
-  /**
-   * Pacing per COMBINATION. Every clear runs in steps and some of them throw bolts;
-   * these are the two numbers that time one, and each combination owns its own pair so
-   * tuning the cookie pair cannot touch the bomb pair.
-   *
-   * - `stepSec` — between one step of that clear and the next. What a "step" is differs
-   *   per combination: a column for the cookie pair, a ring for the bomb pair, a shell
-   *   of the cross for the stripe pair.
-   * - `beamSec` — how long that combination's bolts take to fly. A fixed effect length:
-   *   it is spent once as a lead-in and never folded into `stepSec`, so making a clear
-   *   quicker does not make its bolts quicker.
-   *
-   * Anything NOT a combination — an ordinary match, a lone special going off — uses the
-   * shared {@link special}.sweepStepSec and {@link cookieBeam}.strikeSec.
+   * The rest of each object is that combination's own rule.
    */
   public readonly combos = {
     /** Cookie + gem: that colour goes at once, so only the bolts are really timed. */
     cookieGem: { stepSec: 0.04, beamSec: 0.18 },
     /** Cookie + cookie: the whole board, column by column from the left. */
     cookiePair: { stepSec: 0.08, beamSec: 0.3 },
-    /** Bomb + bomb: one square blast, ring by ring. */
-    bombPair: { stepSec: 0.05, beamSec: 0.18 },
-    /** Stripe + stripe: the cross, outward from the crossing. */
+    /**
+     * Bomb + bomb: instead of two overlapping rings they go off together over a square
+     * of `radius` around the swap. 1 is the ordinary 3x3 blast; 2 is 5x5, 3 is 7x7.
+     * Clipped at the board edge rather than slid inward — a bomb in the corner takes the
+     * quarter it can reach.
+     */
+    bombPair: { radius: 2, stepSec: 0.05, beamSec: 0.18 },
+    /** Stripe + stripe: the cross through the swapped cell, outward from the crossing. */
     stripePair: { stepSec: 0.04, beamSec: 0.18 },
-    /** Bomb + stripe: each of the merged item's two waves, rows then columns. */
-    giant: { stepSec: 0.03, beamSec: 0.18 }
+    /**
+     * Cookie + bomb: every gem of that colour becomes a bomb, then they go off one after
+     * another, each pulsing until its turn.
+     */
+    cookieBomb: {
+      /** After everything has turned into a bomb, before the first one goes. */
+      startDelaySec: 0.6,
+      /** Between one converted bomb going off and the next. */
+      stepDelaySec: 0.18
+    },
+    /**
+     * Bomb + stripe: instead of both going off they MERGE into a single item covering a
+     * `spanCells` × `spanCells` block at the swap. The gems under it are gone and the
+     * block counts as filled — nothing falls into it while the item lives. Then its rows
+     * clear end to end; `waveGapSec` later the item pops and its columns go with it.
+     *
+     * `spanCells` is the mechanic, not a look: 3 means three rows and three columns.
+     * Even numbers have no centre cell, so keep it odd.
+     */
+    bombStripe: {
+      enabled: true,
+      spanCells: 3,
+      /** Between the row wave and the column wave, which the item pops along with. */
+      waveGapSec: 0,
+      /** After the last wave, before the empty block is let go and refills. */
+      endHoldSec: 0,
+      stepSec: 0.03,
+      beamSec: 0.18
+    }
   };
   /**
    * The ring that marks contact on a swap — one on each of the two cells, growing and
@@ -345,12 +356,15 @@ export class Match3Config {
     color: 0xffffff,
     /** Opacity it starts at. It fades to nothing over `sec`. */
     opacity: 0.55,
-    /** Diameter at the start and at the end, in cells. */
-    fromCells: 0.45,
-    toCells: 1.5,
+    /**
+     * Diameter at the start and at the end, in CELLS — 1 is exactly one cell across, so
+     * anything above that spills over the neighbours.
+     */
+    fromCells: 0.3,
+    toCells: 0.95,
     sec: 0.35,
     /** Ring width as a fraction of its radius. 1 fills it in — a disc rather than a ring. */
-    thickness: 0.22
+    thickness: 0.12
   };
   /** Shake on a clear of at least `minCells`, as a timeline track. 0 disables it. */
   public readonly shake = {

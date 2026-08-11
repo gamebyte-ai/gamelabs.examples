@@ -22,6 +22,22 @@ export type Cell = { row: number; col: number };
  */
 export type SweepCell = Cell & { wave: number };
 
+/** The knobs {@link GameOperations.expandSpecialClears} takes beyond its seed cells. */
+export type ExpandOptions = {
+  /** Colour a cookie was told to take, keyed by cell — set by a swap, absent otherwise. */
+  bombColors?: ReadonlyMap<string, number>;
+  /** Whether a booster's surroundings are full enough for it to go off yet. */
+  boosterReady?: (cell: Cell) => boolean;
+  /** Reports each cookie that fires, the colour it chose and what it takes. */
+  onCookieFired?: (from: Cell, colour: number, targets: readonly Cell[]) => void;
+  /** Reports each bomb that fires, so a caller can decide whether it survives the blast. */
+  onBoosterFired?: (from: Cell) => void;
+  /** Cells already spoken for by another clear: reached, but never fired a second time. */
+  skipCell?: (cell: Cell) => boolean;
+  /** Colours another clear is already taking, so two cookies cannot pick the same one. */
+  excludeColours?: ReadonlySet<number>;
+};
+
 export type MatchRun = {
   readonly cells: readonly Cell[];
   readonly orientation: "row" | "column";
@@ -219,7 +235,15 @@ export class GameOperations implements IInjectionTarget {
    * something other than a swap — there is no partner gem to name a colour, so it
    * takes one at random from the gems in play.
    */
-  public randomVisibleGemType(): number {
+  /**
+   * A colour currently on the board, at random. `exclude` holds the colours other
+   * cookies are already taking — two going off at once must not pick the same one, or
+   * the second finds nothing left to clear.
+   *
+   * Falls back to the full choice when every colour is excluded: better a repeat than a
+   * cookie that does nothing.
+   */
+  public randomVisibleGemType(exclude?: ReadonlySet<number>): number {
     const seen: number[] = [];
     for (let row = this._config.firstVisibleRow; row <= this._config.lastVisibleRow; row++) {
       for (let col = 0; col < this._config.cols; col++) {
@@ -228,7 +252,9 @@ export class GameOperations implements IInjectionTarget {
       }
     }
     if (seen.length === 0) return -1;
-    return seen[Math.floor(Math.random() * seen.length)];
+    const free = exclude ? seen.filter((t) => !exclude.has(t)) : seen;
+    const pool = free.length > 0 ? free : seen;
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   /**
@@ -394,14 +420,21 @@ export class GameOperations implements IInjectionTarget {
     // Seeds may carry their own `wave` — a cross already knows how far each of its
     // cells sits from the crossing. Anything without one starts the sweep at 0.
     cells: readonly (Cell & { wave?: number })[],
-    bombColors?: ReadonlyMap<string, number>,
-    boosterReady?: (cell: Cell) => boolean,
-    // Reports each cookie that goes off and what it takes. The model has no business
-    // knowing about bolts, but it is the only place that knows WHICH cookie took WHICH
-    // gems — a caller that wants to draw the connection has nowhere else to get it.
-    onCookieFired?: (from: Cell, targets: readonly Cell[]) => void
+    // The model has no business knowing about bolts, but it is the only place that knows
+    // WHICH cookie took WHICH gems — a caller that wants to draw that has nowhere else
+    // to get it, hence `onCookieFired`.
+    { bombColors, boosterReady, onCookieFired, onBoosterFired, skipCell, excludeColours }: ExpandOptions = {}
   ): SweepCell[] {
     const deferred = new Set<string>();
+    /**
+     * Cells whose special has already gone off in this pass. A booster fires ONCE: two
+     * stripes crossing the same cookie reach it twice, and without this it would take a
+     * second colour on the second visit. Waves still improve — only the firing is
+     * one-shot.
+     */
+    const fired = new Set<string>();
+    /** Colours taken here, so two cookies in one clear cannot pick the same one. */
+    const taken = new Set<number>(excludeColours ?? []);
     const key = (c: Cell): string => `${c.row},${c.col}`;
     const out = new Map<string, SweepCell>();
     const pending: SweepCell[] = [];
@@ -417,6 +450,10 @@ export class GameOperations implements IInjectionTarget {
       const cell = pending.pop()!;
       const special = this.specialAt(cell.row, cell.col);
       if (special === GemSpecial.None) continue;
+      // One firing per gem, and none at all for a gem another clear already owns — it is
+      // going off over there, not here.
+      if (fired.has(key(cell)) || skipCell?.(cell)) continue;
+      fired.add(key(cell));
 
       // A sweep only ever reaches the playable window. A column sweep taken over the
       // whole grid would wipe that column's entire reserve — 40 rows of authored
@@ -431,20 +468,18 @@ export class GameOperations implements IInjectionTarget {
           continue;
         }
         swept = this.neighbourCells(cell.row, cell.col).filter((c) => this.itemIdAt(c.row, c.col) >= 0);
+        onBoosterFired?.({ row: cell.row, col: cell.col });
       } else if (special === GemSpecial.ColorBomb) {
         // A swap names the colour (the gem it traded places with); anything else —
         // caught in a stripe, in a cascade — takes one from what is on the board.
+        // Set off indirectly — caught in someone else's blast, with no partner to name a
+        // colour. It picks one from what is on the board and takes that colour whole,
+        // exactly as a swapped one would; only the choice of colour differs.
         const named = bombColors?.get(key(cell));
-        if (named !== undefined) {
-          swept = this.visibleCellsOfType(named);
-        } else {
-          // Set off indirectly — caught in someone else's blast, with no partner to name
-          // a colour. It picks one from what is on the board and takes that colour whole,
-          // exactly as a swapped one would; only the choice of colour is different.
-          const colour = this.randomVisibleGemType();
-          swept = colour >= 0 ? this.visibleCellsOfType(colour) : [];
-        }
-        onCookieFired?.({ row: cell.row, col: cell.col }, swept);
+        const colour = named !== undefined ? named : this.randomVisibleGemType(taken);
+        swept = colour >= 0 ? this.visibleCellsOfType(colour) : [];
+        if (colour >= 0) taken.add(colour);
+        onCookieFired?.({ row: cell.row, col: cell.col }, colour, swept);
       } else if (special === GemSpecial.GiantStripe) {
         // Runs its own two-wave routine and holds its block until it is done, so nothing
         // here may sweep on its behalf. Its cell stays in the clear set like any gem.
@@ -634,12 +669,10 @@ export class GameOperations implements IInjectionTarget {
     const col = Math.max(0, Math.floor(this._config.cols / 2) - 1);
     if (col + 1 >= this._config.cols) return;
 
-    // Two cookies side by side: swapping them takes the whole board, left to right.
-    // Their colour is never read — a cookie is colourless — but one is still stored, so
-    // it takes the colour the debug limit thins out like the other seeds did.
-    const type = this._config.debugLimitGemType.gemType;
-    this.createSpecial(row, col, type, GemSpecial.ColorBomb);
-    this.createSpecial(row, col + 1, type, GemSpecial.ColorBomb);
+    // One bomb on its own, in a colour the board has plenty of, so it is easy to bring
+    // a third gem to it and set it off. Matching it is the only way in — a bomb swapped
+    // with an ordinary gem does nothing unless that swap makes a line.
+    this.createSpecial(row, col, 0, GemSpecial.Booster);
   }
 
   private _resolveAllMatchesSync(): void {

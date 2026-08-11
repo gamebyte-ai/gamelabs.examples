@@ -169,7 +169,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const go = this.getGridObject(gridId);
     if (!cfg || !go || targets.length === 0) return Promise.resolve();
     // A combination times its own bolts; anything else takes the shared flight time.
-    const flight = strikeSec ?? cfg.cookieBeam.strikeSec;
+    const flight = strikeSec ?? cfg.cookie.beam.strikeSec;
     if (flight <= 0) return Promise.resolve();
 
     const origin = go.getCell(from.col, from.row);
@@ -194,7 +194,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         // Cleanup rides on the fade, which plays out after the gems have gone.
         gsap.to(materials, {
           opacity: 0,
-          duration: cfg.cookieBeam.fadeSec,
+          duration: cfg.cookie.beam.fadeSec,
           // Kills the flicker tween on the same property, so nothing pulls the bolt
           // back up while it is fading.
           overwrite: true,
@@ -223,9 +223,9 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         }
 
         const material = new THREE.MeshBasicMaterial({
-          color: cfg.cookieBeam.color,
+          color: cfg.cookie.beam.color,
           transparent: true,
-          opacity: cfg.cookieBeam.opacity,
+          opacity: cfg.cookie.beam.opacity,
           blending: THREE.AdditiveBlending,
           depthWrite: false
         });
@@ -234,7 +234,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         const bolt = new THREE.Mesh(geometry, material);
         bolt.rotation.x = -Math.PI / 2;
         // ±40%, so a volley of bolts is ragged rather than a set of identical bars.
-        bolt.scale.set(0, cfg.cookieBeam.thickness * (0.6 + Math.random() * 0.8), 1);
+        bolt.scale.set(0, cfg.cookie.beam.thickness * (0.6 + Math.random() * 0.8), 1);
 
         const pivot = new THREE.Group();
         pivot.position.copy(start);
@@ -251,11 +251,11 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           ease: "power2.in",
           onComplete: landed
         });
-        if (cfg.cookieBeam.flickers > 0) {
+        if (cfg.cookie.beam.flickers > 0) {
           gsap.to(material, {
-            opacity: cfg.cookieBeam.opacity * 0.45,
-            duration: flight / (cfg.cookieBeam.flickers * 2),
-            repeat: cfg.cookieBeam.flickers * 2 - 1,
+            opacity: cfg.cookie.beam.opacity * 0.45,
+            duration: flight / (cfg.cookie.beam.flickers * 2),
+            repeat: cfg.cookie.beam.flickers * 2 - 1,
             yoyo: true
           });
         }
@@ -366,7 +366,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   public animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean): void {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
-    if (!cfg || !go || !cfg.stripeWave.enabled || cfg.stripeWaveCellsPerSec <= 0) return;
+    if (!cfg || !go || !cfg.stripe.wave.enabled || cfg.stripeWaveCellsPerSec <= 0) return;
 
     const origin = go.getCell(at.col, at.row);
     if (!origin) return;
@@ -382,13 +382,13 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const cellStep = alongRow ? preset.columnSize : preset.rowSize;
     const lanes = alongRow ? cfg.cols : cfg.rows;
     // Half the board plus the overshoot: far enough to be off screen before it stops.
-    const distance = (lanes / 2 + cfg.stripeWave.overshootCells) * cellStep;
+    const distance = (lanes / 2 + cfg.stripe.wave.overshootCells) * cellStep;
 
     const geometry = new THREE.PlaneGeometry(1, 1);
     const material = new THREE.MeshBasicMaterial({
-      color: cfg.stripeWave.color,
+      color: cfg.stripe.wave.color,
       transparent: true,
-      opacity: cfg.stripeWave.opacity,
+      opacity: cfg.stripe.wave.opacity,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
@@ -405,7 +405,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     for (const direction of [1, -1]) {
       const bar = new THREE.Mesh(geometry, material);
       bar.rotation.x = -Math.PI / 2;
-      bar.scale.set(cfg.stripeWave.lengthCells * cellStep, cfg.stripeWave.widthCells * cellStep, 1);
+      bar.scale.set(cfg.stripe.wave.lengthCells * cellStep, cfg.stripe.wave.widthCells * cellStep, 1);
 
       const pivot = new THREE.Group();
       pivot.position.copy(start);
@@ -450,7 +450,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   /** Advances the white pulse on waiting boosters. */
   private _stepBlinks(dtSeconds: number, byId: Map<number, GameBoardItemObject>, cfg: Match3Config): void {
     if (this._blinking.size === 0) return;
-    const step = Math.max(0.01, cfg.booster.blinkStepSec);
+    const step = Math.max(0.01, cfg.bomb.blinkStepSec);
 
     for (const [itemId, elapsed] of [...this._blinking]) {
       const gem = byId.get(itemId);
@@ -599,7 +599,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           z: 0.02,
           // Cells further along a sweep start later, so the line clears outward from
           // the gem that fired it rather than vanishing in one go.
-          delay: (wave ?? 0) * cfg.special.sweepStepSec,
+          delay: (wave ?? 0) * cfg.clear.stepSec,
           duration: total,
           ease: cfg.animPopEase,
           overwrite: true,
