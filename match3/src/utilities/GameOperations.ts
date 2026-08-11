@@ -633,6 +633,9 @@ export class GameOperations implements IInjectionTarget {
     this._gameModel.resetScore();
     this._applyDebugGemTypeLimit();
     if (this._config.debugSeedBoosters) this._seedBoosterPair();
+    // Both of the above repaint cells of an already-settled board, so the check comes
+    // after them, not before.
+    this._clearOpeningMatches();
   }
 
   /**
@@ -650,13 +653,54 @@ export class GameOperations implements IInjectionTarget {
         if (this.gemTypeAt(row, col) !== limit.gemType) continue;
         if (seen++ < limit.count) continue;
 
-        for (let guard = 0; guard < 30; guard++) {
-          const t = Math.floor(Math.random() * this._config.gemTypeCount);
-          if (t === limit.gemType || this._wouldCreateTripleAt(col, row, t)) continue;
-          this._grid.setCellItem(col, row, this._createItem(t));
-          break;
-        }
+        this._recolourWithoutLine(col, row, limit.gemType);
       }
+    }
+  }
+
+  /**
+   * Repaints one cell with a colour that leaves no line through it, `avoid` excepted
+   * (-1 to allow every colour). Falls back to the colour that was there.
+   *
+   * Uses the FULL line test, not the fill's {@link _wouldCreateTripleAt}. That one looks
+   * only left and up, which is right while filling an empty board — everything ahead is
+   * still blank — but wrong for repainting a cell of a finished board, where a colour can
+   * just as easily complete a run to the right, below, or straddling the cell. That blind
+   * spot is what let the game open on a match: the debug colour cap repainted cells with
+   * it after the board had already been made match-free.
+   */
+  private _recolourWithoutLine(col: number, row: number, avoid: number): void {
+    const original = this._gemAt(col, row);
+    for (let t = 0; t < this._config.gemTypeCount; t++) {
+      if (t === avoid) continue;
+      this._grid.setCellItem(col, row, this._createItem(t));
+      if (!this._formsLineAt(col, row)) return;
+    }
+    this._grid.setCellItem(col, row, this._createItem(original));
+  }
+
+  /**
+   * Last word on the opening board: while any match is standing, repaint one ORDINARY gem
+   * out of it. Specials are left alone — they were placed deliberately.
+   *
+   * A net rather than a rule: every step above already tries not to create a match, and
+   * this is here so that the invariant "the game never opens on a match" holds even if a
+   * later one forgets to.
+   */
+  private _clearOpeningMatches(): void {
+    for (let guard = 0; guard < 200; guard++) {
+      const runs = this.findMatchRuns();
+      if (runs.length === 0) return;
+
+      let repainted = false;
+      for (const run of runs) {
+        const cell = run.cells.find((c) => this.specialAt(c.row, c.col) === GemSpecial.None);
+        if (!cell) continue;
+        this._recolourWithoutLine(cell.col, cell.row, -1);
+        repainted = true;
+      }
+      // Nothing left that may be touched — a match made entirely of specials.
+      if (!repainted) return;
     }
   }
 
@@ -669,23 +713,30 @@ export class GameOperations implements IInjectionTarget {
     const col = Math.max(0, Math.floor(this._config.cols / 2) - 1);
     if (col + 1 >= this._config.cols) return;
 
-    // One bomb on its own. Matching it is the only way in — a bomb swapped with an
-    // ordinary gem does nothing unless that swap makes a line — so it wants a colour the
-    // board has plenty of.
-    //
-    // The colour is CHOSEN, not fixed: the board was built match-free and this overwrites
-    // one of its cells, which can put three of a colour in a line that was not there
-    // before. Every candidate is tried in place and the first that forms no line wins, so
-    // the game cannot open on a match nobody made.
+    // A cookie beside a bomb: swapping them turns every gem of that colour into a bomb
+    // and sets them off one after another.
+    this._seedSpecial(row, col, GemSpecial.ColorBomb);
+    this._seedSpecial(row, col + 1, GemSpecial.Booster);
+  }
+
+  /**
+   * Places one special without opening the board on a match.
+   *
+   * The colour is CHOSEN, not fixed: this overwrites a cell of a board that was built
+   * match-free, and a fixed colour can put three of a kind in a line that was not there
+   * before. Every candidate is tried in place and the first that forms no line stays. A
+   * cookie is colourless, so any colour will do for it — the loop settles on the first.
+   * If nothing fits, the cell goes back exactly as the fill left it.
+   */
+  private _seedSpecial(row: number, col: number, kind: GemSpecial): void {
     const original = this._gemAt(col, row);
     for (let t = 0; t < this._config.gemTypeCount; t++) {
-      this.createSpecial(row, col, t, GemSpecial.Booster);
+      this.createSpecial(row, col, t, kind);
       if (!this._formsLineAt(col, row)) return;
     }
-    // No colour fits here. Put the cell back exactly as the match-free fill left it and
-    // skip the seed rather than open the game on a match.
     this._grid.setCellItem(col, row, this._createItem(original));
   }
+
 
   private _resolveAllMatchesSync(): void {
     while (true) {

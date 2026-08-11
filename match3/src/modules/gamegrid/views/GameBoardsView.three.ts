@@ -40,16 +40,6 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * never meant to be.
    */
   private readonly _swapping = new Set<number>();
-  /**
-   * Items that were created where they stand — a special promoted out of its match, the
-   * merged bomb+stripe — rather than spawned above the board.
-   *
-   * `reconcileColumns` has no other way to tell the two apart: both are item ids it has
-   * never seen, and it lifts an unknown gem above the column because that is where a
-   * refilled one comes from. A special born in its cell would then fly up and fall back
-   * in from the top, arriving AFTER the gems that were already on their way down.
-   */
-  private readonly _bornInPlace = new Set<number>();
   /** Item ids currently pulsing white, and how far through the pulse each is. */
   private readonly _blinking = new Map<number, number>();
 
@@ -310,7 +300,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       ring.rotation.x = -Math.PI / 2;
       ring.position.copy(this.worldToLocal(world.clone()));
       ring.position.y = GameBoardsView.PULSE_Y;
-      ring.scale.setScalar(cfg.swapPulse.fromCells * cellStep);
+      ring.scale.setScalar(cfg.swapPulse.fromCells * cfg.swapPulse.scale * cellStep);
       this.add(ring);
       rings.push(ring);
     }
@@ -320,7 +310,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       return;
     }
 
-    const to = cfg.swapPulse.toCells * cellStep;
+    const to = cfg.swapPulse.toCells * cfg.swapPulse.scale * cellStep;
     gsap.to(
       rings.map((r) => r.scale),
       { x: to, y: to, z: to, duration: cfg.swapPulse.sec, ease: "power2.out" }
@@ -351,11 +341,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     if (!cfg || !go) return;
 
     const gem = this._getGem(go, at.col, at.row);
-    if (!gem) return;
-    // Registered whatever the animation does: the next reconcile must not mistake it for
-    // a gem falling in from the reserve.
-    this._bornInPlace.add(gem.itemId);
-    if (cfg.animPopSec <= 0) return;
+    if (!gem || cfg.animPopSec <= 0) return;
 
     const target = { x: gem.scale.x, y: gem.scale.y, z: gem.scale.z };
     gem.scale.setScalar(0.02);
@@ -398,13 +384,19 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     // Half the board plus the overshoot: far enough to be off screen before it stops.
     const distance = (lanes / 2 + cfg.stripe.wave.overshootCells) * cellStep;
 
-    const geometry = new THREE.PlaneGeometry(1, 1);
+    const geometry = this._buildWaveGeometry(
+      cfg.stripe.wave.lengthCells * cellStep,
+      cfg.stripe.wave.widthCells * cellStep,
+      cfg.stripe.wave.bowCells * cellStep
+    );
     const material = new THREE.MeshBasicMaterial({
       color: cfg.stripe.wave.color,
       transparent: true,
       opacity: cfg.stripe.wave.opacity,
       blending: THREE.AdditiveBlending,
-      depthWrite: false
+      depthWrite: false,
+      // The strip is hand-built, so which way it winds is not worth depending on.
+      side: THREE.DoubleSide
     });
 
     let alive = 2;
@@ -417,9 +409,10 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     };
 
     for (const direction of [1, -1]) {
+      // Built at its real size, so it is not scaled here — scaling would stretch the bow
+      // along with everything else and the curve would no longer be the one configured.
       const bar = new THREE.Mesh(geometry, material);
       bar.rotation.x = -Math.PI / 2;
-      bar.scale.set(cfg.stripe.wave.lengthCells * cellStep, cfg.stripe.wave.widthCells * cellStep, 1);
 
       const pivot = new THREE.Group();
       pivot.position.copy(start);
@@ -437,6 +430,65 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         onComplete: drop(pivot)
       });
     }
+  }
+
+  /**
+   * The wave's shape: a strip across the lane, bowed FORWARD in the middle by `bow`.
+   *
+   * A flat quad reads as a bar being pushed along. Bending it makes it read as a front
+   * travelling out from the gem — the middle, closest to where it came from, runs ahead
+   * and the edges trail. The bulge is a parabola over the lane, so it is strongest at the
+   * centre line and dies to nothing at the edges, and `bow: 0` gives back the flat bar.
+   */
+  private _buildWaveGeometry(depth: number, width: number, bow: number): THREE.BufferGeometry {
+    // Enough segments that the curve reads as a curve rather than a chevron.
+    const segments = 24;
+    const positions: number[] = [];
+    const indices: number[] = [];
+
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const lateral = (t - 0.5) * width;
+      const lead = bow * (1 - Math.pow(2 * (t - 0.5), 2));
+      positions.push(lead + depth * 0.5, lateral, 0);
+      positions.push(lead - depth * 0.5, lateral, 0);
+    }
+    for (let i = 0; i < segments; i++) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    return geometry;
+  }
+
+  /**
+   * Whether the gem in this cell is still ABOVE the board — owning a playable cell but
+   * not yet inside the window the player can see.
+   *
+   * Owning a cell and having arrived in it are two different things: gravity assigns a
+   * cell the instant a gap opens, while the gem may still be rows above it. A wave that
+   * asks the model alone clears a gem the player cannot see, out of a cell that looks
+   * empty — so the waves ask this too.
+   */
+  public isAboveBoard(gridId: number, row: number, col: number): boolean {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go) return false;
+
+    const gem = this._getGem(go, col, row);
+    if (!gem || !this._falls.has(gem.itemId)) return false;
+
+    const top = go.getCell(col, cfg.firstVisibleRow);
+    if (!top) return false;
+    const preset = go.preset as RectGridPreset;
+    const gemPos = gem.getWorldPosition(new THREE.Vector3());
+    const topPos = top.getWorldPosition(new THREE.Vector3());
+    // The board runs +row along +Z, so a gem at a smaller Z than the top row — by more
+    // than half a cell, to leave the one that is just arriving alone — is still outside.
+    return gemPos.z < topPos.z - Math.min(preset.rowSize, preset.columnSize) * 0.5;
   }
 
   /**
@@ -664,7 +716,12 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * and re-accelerated every time another match landed. The motion is integrated per
    * frame instead (see {@link stepFalls}), which makes retargeting free.
    */
-  public reconcileColumns(gridId: number, cols: ReadonlySet<number>, captured: Map<number, GemPosition>): Promise<void> {
+  public reconcileColumns(
+    gridId: number,
+    cols: ReadonlySet<number>,
+    captured: Map<number, GemPosition>,
+    spawned: ReadonlySet<number>
+  ): Promise<void> {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
     if (!cfg || !go) return Promise.resolve();
@@ -699,11 +756,15 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         if (was) {
           // Place the rebuilt object exactly where the old one was rendering.
           gem.position.copy(gem.parent!.worldToLocal(new THREE.Vector3(was.x, was.y, was.z)));
-        } else if (this._bornInPlace.delete(gem.itemId)) {
-          // Already where it belongs: it was created in this cell, not spawned above it.
-          gem.position.set(0, 0, 0);
-        } else {
+        } else if (spawned.has(gem.itemId)) {
+          // Refill made this one: it enters from above the column.
           gem.position.copy(up.clone().multiplyScalar(spawnLift));
+        } else {
+          // Created in this cell — a booster a match left behind, a converted gem, the
+          // merged item. It starts where it was made. Whether it FALLS is not decided
+          // here at all: if the cells under it are empty, the next pass hands it a lower
+          // cell and it drops from wherever it stands.
+          gem.position.set(0, 0, 0);
         }
 
         const height = gem.position.length();

@@ -105,8 +105,6 @@ function labelTexture(label: string, color: number): THREE.Texture {
 }
 
 export class GameBoardItemObject extends GridItemObject {
-  private static readonly SELECTION_ACCENT = 0xfbbf24;
-  private static readonly SELECTION_SCALE = 1.1;
   private static readonly QUAD_Y = 0.06;
   /** Below the gem quad, above the board outline (`0.02`) and backdrop (`0.03`). */
   private static readonly SHADOW_Y = 0.045;
@@ -210,7 +208,7 @@ export class GameBoardItemObject extends GridItemObject {
     const haloR = size * 0.55;
     const haloGeom = new THREE.RingGeometry(haloR * 0.78, haloR, 32);
     const haloMat = new THREE.MeshBasicMaterial({
-      color: GameBoardItemObject.SELECTION_ACCENT,
+      color: options.selection.color,
       transparent: true,
       opacity: 0.85,
       depthTest: false,
@@ -370,8 +368,9 @@ export class GameBoardItemObject extends GridItemObject {
   }
 
   public setHighlighted(on: boolean): void {
-    if (this._selectionHalo) this._selectionHalo.visible = on;
-    this.scale.setScalar(on ? GameBoardItemObject.SELECTION_SCALE : 1);
+    const selection = (this._options as GameBoardItemObjectOptions).selection;
+    if (this._selectionHalo) this._selectionHalo.visible = on && selection.enabled;
+    this.scale.setScalar(on && selection.enabled ? selection.scale : 1);
   }
 
   public killAnimations(): void {

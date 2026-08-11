@@ -220,6 +220,11 @@ export class Match3Config {
       lengthCells: 0.35,
       /** Width across the lane, in cells. 1 is exactly one cell wide. */
       widthCells: 1,
+      /**
+       * How far the middle of the wave runs AHEAD of its edges, in cells — the bow. 0 is
+       * a flat bar being pushed along; higher values read as a front curving outward.
+       */
+      bowCells: 0.5,
       /** Cells beyond the board's edge it keeps travelling before it is dropped. */
       overshootCells: 10,
       /** Only used when the clear is instant (`clear.stepSec: 0`) — see below. */
@@ -330,14 +335,30 @@ export class Match3Config {
     /** Stripe + stripe: the cross through the swapped cell, outward from the crossing. */
     stripePair: { stepSec: 0.04, beamSec: 0.18 },
     /**
-     * Cookie + bomb: every gem of that colour becomes a bomb, then they go off one after
-     * another, each pulsing until its turn.
+     * Cookie + stripe: every gem of that colour becomes a stripe, then they fire one
+     * after another, each pulsing until its turn. A converted gem is off limits to
+     * everything else until then, so the board does not go off all at once.
      */
+    cookieStripe: {
+      /** After everything has turned into a stripe, before the first one fires. */
+      startDelaySec: 0.75,
+      /** Between one converted stripe firing and the next. */
+      stepDelaySec: 0.09,
+      /**
+       * Inside ONE of those firings: the gap between the cells of its line going. This is
+       * what decides whether a stripe's gems pop WITH it or trail behind it — a converted
+       * board fires many stripes in a row, and at the board's shared rate their pops pile
+       * up and land long after the stripe that caused them. 0 clears each line at once.
+       */
+      stepSec: 0,
+      beamSec: 0.18
+    },
+    /** Cookie + bomb: the same, with bombs. Timed on its own — the blasts are heavier. */
     cookieBomb: {
-      /** After everything has turned into a bomb, before the first one goes. */
       startDelaySec: 0.6,
-      /** Between one converted bomb going off and the next. */
-      stepDelaySec: 0.18
+      stepDelaySec: 0.18,
+      stepSec: 0.03,
+      beamSec: 0.18
     },
     /**
      * Bomb + stripe: instead of both going off they MERGE into a single item covering a
@@ -360,6 +381,17 @@ export class Match3Config {
     }
   };
   /**
+   * The ring around the gem the player has picked, and how much that gem grows while it
+   * is held. Distinct from {@link swapPulse}, which is the contact on the swap itself —
+   * this one stays up until the selection is spent.
+   */
+  public readonly selection = {
+    enabled: true,
+    color: 0xffffff,
+    /** How much the picked gem grows. 1 leaves it alone. */
+    scale: 1
+  };
+  /**
    * The ring that marks contact on a swap — one on each of the two cells, growing and
    * fading out. Purely decoration: it is fired as the gems start trading places and
    * nothing waits for it.
@@ -367,17 +399,28 @@ export class Match3Config {
   public readonly swapPulse = {
     enabled: true,
     color: 0xffffff,
-    /** Opacity it starts at. It fades to nothing over `sec`. */
-    opacity: 0.55,
+    /**
+     * Opacity it starts at, fading to nothing over `sec`.
+     *
+     * The ring is drawn OVER the gems, so a translucent one shows the gem underneath and
+     * takes its colour — white at 0.55 reads orange over a yellow gem. Near 1 it reads as
+     * the colour it is set to whatever it passes over.
+     */
+    opacity: 0.95,
     /**
      * Diameter at the start and at the end, in CELLS — 1 is exactly one cell across, so
-     * anything above that spills over the neighbours.
+     * anything above that spills over the neighbours. The pair sets how far it GROWS.
      */
     fromCells: 0.3,
     toCells: 0.95,
+    /**
+     * Multiplies both of the above, so the whole ring can be sized up or down without
+     * changing how much it grows. 1 leaves them as written.
+     */
+    scale: 0.8,
     sec: 0.35,
     /** Ring width as a fraction of its radius. 1 fills it in — a disc rather than a ring. */
-    thickness: 0.12
+    thickness: 0.1
   };
   /** Shake on a clear of at least `minCells`, as a timeline track. 0 disables it. */
   public readonly shake = {

@@ -34,6 +34,11 @@ export interface IGameBoardsView extends IGridView {
    * screen edge. Decoration only — nothing waits for it.
    */
   animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean): void;
+  /**
+   * Whether this cell's gem owns the cell but has not arrived in it yet — still above the
+   * playable window. Such a gem is not a target for anything.
+   */
+  isAboveBoard(gridId: number, row: number, col: number): boolean;
   /** `wave` staggers the clear: 0 is the match itself, higher values are further along a sweep. */
   animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[]): Promise<void>;
   /**
@@ -43,5 +48,11 @@ export interface IGameBoardsView extends IGridView {
    */
   captureGemPositions(gridId: number, cols: ReadonlySet<number>): Map<number, GemPosition>;
   /** Flies every gem in `cols` to its current cell, from wherever it actually is. */
-  reconcileColumns(gridId: number, cols: ReadonlySet<number>, captured: Map<number, GemPosition>): Promise<void>;
+  reconcileColumns(
+    gridId: number,
+    cols: ReadonlySet<number>,
+    captured: Map<number, GemPosition>,
+    /** Items refill has just created: only these enter from above the column. */
+    spawned: ReadonlySet<number>
+  ): Promise<void>;
 }

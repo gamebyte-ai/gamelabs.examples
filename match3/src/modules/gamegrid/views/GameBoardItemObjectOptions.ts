@@ -30,6 +30,13 @@ export interface GemBoosterOptions {
   readonly blinkColor: number;
 }
 
+/** Look of the ring around a picked gem — see `Match3Config.selection`. */
+export interface GemSelectionOptions {
+  readonly enabled: boolean;
+  readonly color: number;
+  readonly scale: number;
+}
+
 export class GameBoardItemObjectOptions extends GridItemObjectOptions {
   public readonly gemType: number;
   /**
@@ -42,6 +49,7 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
   public readonly special: GemSpecial;
   public readonly stripe: GemStripeOptions;
   public readonly booster: GemBoosterOptions;
+  public readonly selection: GemSelectionOptions;
   /** Cells a merged bomb+stripe covers — how many times oversize to draw it. */
   public readonly giantSpanCells: number;
 
@@ -53,6 +61,7 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
     special: GemSpecial,
     stripe: GemStripeOptions,
     booster: GemBoosterOptions,
+    selection: GemSelectionOptions,
     giantSpanCells: number
   ) {
     super(itemId, gridPreset);
@@ -61,6 +70,7 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
     this.special = special;
     this.stripe = stripe;
     this.booster = booster;
+    this.selection = selection;
     this.giantSpanCells = giantSpanCells;
   }
 }

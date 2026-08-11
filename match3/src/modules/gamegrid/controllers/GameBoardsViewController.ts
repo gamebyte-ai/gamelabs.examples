@@ -133,7 +133,7 @@ export class GameBoardsViewController extends GridsViewController {
   protected override createItemObjectOption(item: IGridItem, grid: IRectGrid): GameBoardItemObjectOptions {
     if (!(item instanceof GameBoardItem)) throw new Error("Expected GameBoardItem");
     const cfg = this._config ?? new Match3Config();
-    return new GameBoardItemObjectOptions(item.itemId, grid.preset, item.gemType, cfg.gemShadow, item.special, cfg.stripe, cfg.bomb, cfg.combos.bombStripe.spanCells);
+    return new GameBoardItemObjectOptions(item.itemId, grid.preset, item.gemType, cfg.gemShadow, item.special, cfg.stripe, cfg.bomb, cfg.selection, cfg.combos.bombStripe.spanCells);
   }
 
   /**
@@ -304,7 +304,8 @@ export class GameBoardsViewController extends GridsViewController {
       // The combination owns this move. Returning here skips the `_settle` below on
       // purpose: the swap may also line up three of that colour, and resolving it would
       // clear the very gems the combination is about to turn into boosters.
-      void this._runCookieComboAsync(gridId, partnerType, comboKind);
+      // The cookie has traded places, so it now sits where its partner was.
+      void this._runCookieComboAsync(gridId, bombFirst ? { row: r1, col: c1 } : { row: r0, col: c0 }, partnerType, comboKind);
       this._lastSwap = null;
       return;
     }
@@ -615,9 +616,11 @@ export class GameBoardsViewController extends GridsViewController {
     const cells = svc.expandSpecialClears(seed, {
       bombColors,
       boosterReady,
-      // A gem another clear is already working through goes off there, not here. This is
-      // what stops two stripes in one row from each setting off the same cookie.
-      skipCell: (cell) => this._isCellClaimed(cell.row, cell.col),
+      // A gem another clear is already working through goes off there, not here — which
+      // is what stops two stripes in one row from each setting off the same cookie. A gem
+      // waiting its turn in a combination is off limits for the same reason: its turn is
+      // already booked, and firing it early is what made a converted board go off at once.
+      skipCell: (cell) => this._isCellClaimed(cell.row, cell.col) || this._isQueued(cell),
       excludeColours: this._firingColours,
       onCookieFired: (from, colour, targets) => {
         if (colour >= 0) colours.push(colour);
@@ -637,8 +640,19 @@ export class GameBoardsViewController extends GridsViewController {
     // simply ate it — the trace read "bomb N was gone before its next blast" — so the
     // second blast and the pulse leading up to it were never seen.
     for (const c of cells) {
+      // Owning a cell is not the same as being in it. A gem still above the window is
+      // not on the board yet, so no wave may take it — the player would see a cell clear
+      // that looks empty, and a gem vanish before it ever arrived.
+      if (this._gridsView?.isAboveBoard(Match3Config.GRID_ID, c.row, c.col)) {
+        kept.add(this._cellKey(c.row, c.col));
+        continue;
+      }
       const itemId = svc.itemIdAt(c.row, c.col);
-      if (itemId >= 0 && this._boosterBlasts.has(itemId)) kept.add(this._cellKey(c.row, c.col));
+      if (itemId < 0) continue;
+      // Armed bombs and gems queued by a combination are both waiting on a turn of their
+      // own. Skipping their firing is not enough — left in the clear they would simply be
+      // taken as ordinary gems and the turn would never come.
+      if (this._boosterBlasts.has(itemId) || this._comboQueue.has(itemId)) kept.add(this._cellKey(c.row, c.col));
     }
     const remaining = kept.size === 0 ? cells : cells.filter((c) => !kept.has(this._cellKey(c.row, c.col)));
     return { cells: remaining, bolts, colours };
@@ -879,40 +893,66 @@ export class GameBoardsViewController extends GridsViewController {
    * moment it is converted until its own turn, so the queue reads rather than firing at
    * once. Works for any kind — the bomb takes its neighbours, a stripe sweeps its line.
    */
-  private async _runCookieComboAsync(gridId: number, gemType: number, kind: GemSpecial): Promise<void> {
+  private async _runCookieComboAsync(gridId: number, from: Cell, gemType: number, kind: GemSpecial): Promise<void> {
     const svc = this._operations;
     const cfg = this._config;
-    if (!svc || !cfg || gemType < 0) return;
+    const view = this._gridsView;
+    if (!svc || !cfg || !view || gemType < 0) return;
 
+    const wantsStripe = kind === GemSpecial.StripedRow || kind === GemSpecial.StripedColumn;
+    const pace = wantsStripe ? cfg.combos.cookieStripe : cfg.combos.cookieBomb;
+
+    // The cookie throws its bolts here too, and the gems turn ON IMPACT. Its own paths
+    // already do this; a combination that skipped it made the conversion look like it
+    // came from nowhere.
+    const struck = svc.visibleCellsOfType(gemType).filter((c) => {
+      const standing = svc.specialAt(c.row, c.col);
+      return wantsStripe ? !this._isStripe(standing) : standing !== kind;
+    });
+    await view.animateCookieBeams(gridId, from, struck, pace.beamSec);
+
+    // Converting is the cookie's WHOLE job here. It is spent doing it and comes off the
+    // board straight away: left standing, one of the sweeps it just created would reach it
+    // and set it off again, and it would take a second colour with it.
+    void view.animateClearMatches(gridId, [from]);
+    svc.removeItemAt(from.row, from.col);
     for (const cell of svc.visibleCellsOfType(gemType)) {
+      // Already what the combination would have made it: left exactly as it is, neither
+      // rebuilt nor added to the queue. Rebuilding would hand it a new item id and reset
+      // the axis the player earned.
+      const standing = svc.specialAt(cell.row, cell.col);
+      if (wantsStripe ? this._isStripe(standing) : standing === kind) continue;
+
       // Stripes get a random axis each, so the combination sweeps the board in both
       // directions rather than laying down a set of parallel lines.
-      const axis =
-        kind === GemSpecial.StripedRow || kind === GemSpecial.StripedColumn
-          ? Math.random() < 0.5
-            ? GemSpecial.StripedRow
-            : GemSpecial.StripedColumn
-          : kind;
+      const axis = wantsStripe
+        ? Math.random() < 0.5
+          ? GemSpecial.StripedRow
+          : GemSpecial.StripedColumn
+        : kind;
       svc.createSpecial(cell.row, cell.col, gemType, axis);
+      view.animateSpecialSpawn(gridId, cell);
       // Tracked by id, not position: gravity moves them while the queue is draining.
       this._comboQueue.add(svc.itemIdAt(cell.row, cell.col));
     }
     this._updateBlink(gridId);
     // Everything pulses together for a beat before the first one goes, so the player
     // sees what the combination did.
-    await this._waitSec(cfg.combos.cookieBomb.startDelaySec);
+    await this._waitSec(pace.startDelaySec);
 
     for (const itemId of [...this._comboQueue]) {
       const at = this._findItem(itemId);
       this._comboQueue.delete(itemId);
       this._updateBlink(gridId);
-      if (at) this._detonateSpecial(gridId, at);
-      await this._waitSec(cfg.combos.cookieBomb.stepDelaySec);
+      // Fired on the combination's own pace, so its line pops with it rather than at the
+      // board's shared rate, where the pops of one firing run into the next.
+      if (at) this._detonateSpecial(gridId, at, pace);
+      await this._waitSec(pace.stepDelaySec);
     }
   }
 
   /** Sets off any special on its own, outside a match — the expansion dispatches. */
-  private _detonateSpecial(gridId: number, at: Cell): void {
+  private _detonateSpecial(gridId: number, at: Cell, pace?: ClearPace): void {
     const svc = this._operations;
     if (!svc) return;
 
@@ -926,7 +966,7 @@ export class GameBoardsViewController extends GridsViewController {
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
-    void this._runChainAsync(gridId, free, null, bolts, undefined, colours);
+    void this._runChainAsync(gridId, free, null, bolts, pace, colours);
   }
 
   /**
@@ -1107,6 +1147,12 @@ export class GameBoardsViewController extends GridsViewController {
     cfg.timeScale = 0;
   }
 
+  /** Whether this cell holds a gem a combination has already booked a turn for. */
+  private _isQueued(cell: Cell): boolean {
+    const itemId = this._operations?.itemIdAt(cell.row, cell.col) ?? -1;
+    return itemId >= 0 && this._comboQueue.has(itemId);
+  }
+
   /** Hands colours back when a clear is abandoned before a chain takes them on. */
   private _dropColours(colours: number[]): void {
     for (const c of colours) this._firingColours.delete(c);
@@ -1275,6 +1321,9 @@ export class GameBoardsViewController extends GridsViewController {
     const captured = view.captureGemPositions(gridId, allCols);
     const moves = svc.applyGravity(undefined, this._isCellClaimed);
     const spawns = svc.refillEmpty(undefined, this._isCellClaimed);
+    // Only these come in from above. Anything else the view has not seen before was
+    // created where it stands, and starts there.
+    const spawnedIds = new Set(spawns.map((s) => svc.itemIdAt(s.row, s.col)).filter((id) => id >= 0));
 
     // Their destination cells hold the gems that are now in the air, so input stays
     // off them until they land.
@@ -1284,7 +1333,7 @@ export class GameBoardsViewController extends GridsViewController {
     ];
     for (const k of inFlight) this._animatingCells.add(k);
     try {
-      await view.reconcileColumns(gridId, allCols, captured);
+      await view.reconcileColumns(gridId, allCols, captured, spawnedIds);
     } finally {
       for (const k of inFlight) this._animatingCells.delete(k);
     }
