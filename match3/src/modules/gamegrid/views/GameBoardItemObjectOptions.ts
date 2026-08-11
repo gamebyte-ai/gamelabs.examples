@@ -24,6 +24,10 @@ export interface GemBoosterOptions {
   readonly label: string;
   readonly labelColor: number;
   readonly labelScale: number;
+  /** How far the waiting pulse goes, 0..1 — 1 is the mask at full strength. */
+  readonly blinkStrength: number;
+  /** Colour the pulse fills the gem's silhouette with. */
+  readonly blinkColor: number;
 }
 
 export class GameBoardItemObjectOptions extends GridItemObjectOptions {

@@ -40,6 +40,16 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * never meant to be.
    */
   private readonly _swapping = new Set<number>();
+  /**
+   * Items that were created where they stand — a special promoted out of its match, the
+   * merged bomb+stripe — rather than spawned above the board.
+   *
+   * `reconcileColumns` has no other way to tell the two apart: both are item ids it has
+   * never seen, and it lifts an unknown gem above the column because that is where a
+   * refilled one comes from. A special born in its cell would then fly up and fall back
+   * in from the top, arriving AFTER the gems that were already on their way down.
+   */
+  private readonly _bornInPlace = new Set<number>();
   /** Item ids currently pulsing white, and how far through the pulse each is. */
   private readonly _blinking = new Map<number, number>();
 
@@ -338,10 +348,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   public animateSpecialSpawn(gridId: number, at: { row: number; col: number }): void {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
-    if (!cfg || !go || cfg.animPopSec <= 0) return;
+    if (!cfg || !go) return;
 
     const gem = this._getGem(go, at.col, at.row);
     if (!gem) return;
+    // Registered whatever the animation does: the next reconcile must not mistake it for
+    // a gem falling in from the reserve.
+    this._bornInPlace.add(gem.itemId);
+    if (cfg.animPopSec <= 0) return;
 
     const target = { x: gem.scale.x, y: gem.scale.y, z: gem.scale.z };
     gem.scale.setScalar(0.02);
@@ -685,6 +699,9 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         if (was) {
           // Place the rebuilt object exactly where the old one was rendering.
           gem.position.copy(gem.parent!.worldToLocal(new THREE.Vector3(was.x, was.y, was.z)));
+        } else if (this._bornInPlace.delete(gem.itemId)) {
+          // Already where it belongs: it was created in this cell, not spawned above it.
+          gem.position.set(0, 0, 0);
         } else {
           gem.position.copy(up.clone().multiplyScalar(spawnLift));
         }

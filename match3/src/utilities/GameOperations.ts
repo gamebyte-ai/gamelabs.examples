@@ -669,10 +669,22 @@ export class GameOperations implements IInjectionTarget {
     const col = Math.max(0, Math.floor(this._config.cols / 2) - 1);
     if (col + 1 >= this._config.cols) return;
 
-    // One bomb on its own, in a colour the board has plenty of, so it is easy to bring
-    // a third gem to it and set it off. Matching it is the only way in — a bomb swapped
-    // with an ordinary gem does nothing unless that swap makes a line.
-    this.createSpecial(row, col, 0, GemSpecial.Booster);
+    // One bomb on its own. Matching it is the only way in — a bomb swapped with an
+    // ordinary gem does nothing unless that swap makes a line — so it wants a colour the
+    // board has plenty of.
+    //
+    // The colour is CHOSEN, not fixed: the board was built match-free and this overwrites
+    // one of its cells, which can put three of a colour in a line that was not there
+    // before. Every candidate is tried in place and the first that forms no line wins, so
+    // the game cannot open on a match nobody made.
+    const original = this._gemAt(col, row);
+    for (let t = 0; t < this._config.gemTypeCount; t++) {
+      this.createSpecial(row, col, t, GemSpecial.Booster);
+      if (!this._formsLineAt(col, row)) return;
+    }
+    // No colour fits here. Put the cell back exactly as the match-free fill left it and
+    // skip the seed rather than open the game on a match.
+    this._grid.setCellItem(col, row, this._createItem(original));
   }
 
   private _resolveAllMatchesSync(): void {

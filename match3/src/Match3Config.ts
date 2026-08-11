@@ -59,6 +59,11 @@ export class Match3Config {
   };
   /** Test aid: start with a stripe beside a bomb, to try their combination. */
   public readonly debugSeedBoosters = true;
+  /**
+   * Test aid: freeze the board (`timeScale = 0`) the instant a special is created with
+   * an empty cell under it, and say so in the console. `match3.play()` resumes.
+   */
+  public readonly debugPauseOnFloatingSpecial = false;
   /** Clip rendering to the board. Off while testing, to see the reserve stacked above. */
   public readonly clipToBoard = false;
 
@@ -286,7 +291,15 @@ export class Match3Config {
     /** Between one blast and the next. It pulses for the whole of this. */
     blastGapSec: 1.5,
     /** One pulse, in seconds: white and back. Lower is a more urgent flash. */
-    blinkStepSec: 0.2
+    blinkStepSec: 0.25,
+    /**
+     * How white the pulse goes, 0..1. Drawn as an additive copy of the gem masked by its
+     * own texture, so it brightens the gem's shape rather than dimming it — a multiply
+     * material cannot go toward white, and a plain quad would light the whole cell.
+     */
+    blinkStrength: 0.9,
+    /** Colour the pulse fills that silhouette with. */
+    blinkColor: 0xffffff
   };
   /**
    * COMBINATIONS — what two boosters do when swapped with each other, one object each.

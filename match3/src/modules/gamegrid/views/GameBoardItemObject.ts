@@ -117,9 +117,25 @@ export class GameBoardItemObject extends GridItemObject {
 
   public declare readonly preset: RectGridPreset;
 
-  private _mesh: THREE.Mesh | null = null;
-  private _selectionHalo: THREE.Mesh | null = null;
-  private _shadow: THREE.Mesh | null = null;
+  /**
+   * Everything {@link createVisual} builds is DECLARED, not initialized.
+   *
+   * The base `GridItemObject` constructor calls `createVisual()` itself, and under
+   * ES2022 class-field semantics (`useDefineForClassFields`) a subclass's fields are
+   * defined immediately AFTER `super()` returns. An initializer here — even a bare
+   * declaration, which still emits `field = undefined` — therefore runs after
+   * `createVisual` and wipes what it just assigned.
+   *
+   * That is why every attempt at a pulse failed: `_mesh` was null by the time anything
+   * could tint it, so the code had nothing to act on and failed silently. `declare`
+   * emits no field at all, which leaves the constructor's assignments standing.
+   */
+  private declare _mesh: THREE.Mesh | null;
+  /** Mask layer for the pulse — the gem's silhouette in a flat colour. Built on demand. */
+  private _flash: THREE.Mesh | null = null;
+  private declare _texture: THREE.Texture | null;
+  private declare _selectionHalo: THREE.Mesh | null;
+  private declare _shadow: THREE.Mesh | null;
 
   public constructor(options: GameBoardItemObjectOptions, pointerListener: IGridObjectListener, inputManager: IWorldPointerInput | null, assetManager?: IAssetManager | null) {
     super(options, pointerListener, inputManager, assetManager);
@@ -188,6 +204,7 @@ export class GameBoardItemObject extends GridItemObject {
     mesh.position.set(0, GameBoardItemObject.QUAD_Y, 0);
     this.add(mesh);
     this._mesh = mesh;
+    this._texture = texture;
 
     // Selection halo ring
     const haloR = size * 0.55;
@@ -272,18 +289,84 @@ export class GameBoardItemObject extends GridItemObject {
    * Fades the gem for the waiting pulse: `amount` 0 leaves it untouched, 1 takes it to
    * `PULSE_MIN_OPACITY`. `null` restores it.
    *
-   * Straight on the gem's own material — no overlay. An additive layer was tried first,
-   * to flash it white, but that needs the gem texture as a silhouette mask; wherever the
-   * texture was missing it degenerated into a white square and lit the whole cell.
-   * Opacity has no such dependency and works for every gem.
+   * Drawn as a MASK: the gem's texture supplies the shape and nothing else, and the
+   * layer is filled with a flat colour. Straight opacity on the gem itself only dims it,
+   * and an additive copy tints by the gem's own colours instead of reaching white — a
+   * multiply material cannot go toward white at all. The mask is the only one of the
+   * three that gives the same flash on every gem.
    */
   public setTint(amount: number | null): void {
+    const t = amount === null ? 0 : Math.max(0, Math.min(1, amount));
+    const flash = this._ensureFlash();
+    if (flash) {
+      const options = this._options as GameBoardItemObjectOptions;
+      const material = flash.material as THREE.ShaderMaterial;
+      material.uniforms.uOpacity.value = t * options.booster.blinkStrength;
+      flash.visible = t > 0;
+      return;
+    }
+
+    // No texture to mask with — dim the gem instead. Less of a flash, but it is the one
+    // thing that works without one.
     const material = this._mesh?.material as THREE.MeshBasicMaterial | undefined;
     if (!material) return;
-
-    const t = amount === null ? 0 : Math.max(0, Math.min(1, amount));
     material.transparent = true;
     material.opacity = 1 - t * (1 - GameBoardItemObject.PULSE_MIN_OPACITY);
+  }
+
+  /**
+   * The pulse layer, built the first time it is needed.
+   *
+   * It reuses the gem's geometry and takes ONLY the alpha of its texture, filling that
+   * silhouette with a flat colour — a mask, not a copy. `MeshBasicMaterial` cannot do
+   * this: `map` supplies rgb as well as alpha and `color` multiplies it, so a coloured
+   * gem can never be flashed to white through it. Four lines of shader can.
+   *
+   * Without a texture there is no silhouette to fill, and a plain quad would light the
+   * whole cell — so that case falls back to dimming the gem instead.
+   */
+  private _ensureFlash(): THREE.Mesh | null {
+    if (this._flash) return this._flash;
+    if (!this._mesh || !this._texture) return null;
+
+    const options = this._options as GameBoardItemObjectOptions;
+    const flash = new THREE.Mesh(
+      this._mesh.geometry,
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uMap: { value: this._texture },
+          uColor: { value: new THREE.Color(options.booster.blinkColor) },
+          uOpacity: { value: 0 }
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform sampler2D uMap;
+          uniform vec3 uColor;
+          uniform float uOpacity;
+          varying vec2 vUv;
+          void main() {
+            float mask = texture2D(uMap, vUv).a;
+            if (mask < 0.01) discard;
+            gl_FragColor = vec4(uColor, mask * uOpacity);
+          }
+        `,
+        transparent: true,
+        depthWrite: false
+      })
+    );
+    flash.rotation.x = -Math.PI / 2;
+    // A hair above the gem quad, under the stripe marks, so it never z-fights.
+    flash.position.set(0, GameBoardItemObject.QUAD_Y + 0.002, 0);
+    flash.visible = false;
+    this.add(flash);
+    this._flash = flash;
+    return flash;
   }
 
   public setHighlighted(on: boolean): void {

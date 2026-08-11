@@ -480,6 +480,9 @@ export class GameBoardsViewController extends GridsViewController {
       // the oversize gem is recognisably the one that went in.
       const color = gemType >= 0 ? gemType : svc.randomVisibleGemType();
       svc.createSpecial(centre.row, centre.col, color, GemSpecial.GiantStripe);
+      // Grows into the block it covers, and is registered as born in place so the next
+      // fall pass does not treat it as a gem arriving from above.
+      view.animateSpecialSpawn(gridId, centre);
 
       this._playBandWaves(gridId, centre, span, true);
       await this._runBandAsync(gridId, at, span, "row");
@@ -629,6 +632,14 @@ export class GameBoardsViewController extends GridsViewController {
     // A bomb with blasts left is pulled OUT of the clear: it threw its ring, and it is
     // still standing to throw another.
     const kept = this._armSurvivingBoosters(survivors);
+    // And it stays out of everyone ELSE's clear until it has: an armed bomb waiting for
+    // its next blast is immune. Without this a cascade landing on it in the meantime
+    // simply ate it — the trace read "bomb N was gone before its next blast" — so the
+    // second blast and the pulse leading up to it were never seen.
+    for (const c of cells) {
+      const itemId = svc.itemIdAt(c.row, c.col);
+      if (itemId >= 0 && this._boosterBlasts.has(itemId)) kept.add(this._cellKey(c.row, c.col));
+    }
     const remaining = kept.size === 0 ? cells : cells.filter((c) => !kept.has(this._cellKey(c.row, c.col)));
     return { cells: remaining, bolts, colours };
   }
@@ -1075,6 +1086,27 @@ export class GameBoardsViewController extends GridsViewController {
     this._updateBlink(gridId);
   }
 
+  /**
+   * Test aid: freezes the board the moment a special is created with nothing under it.
+   *
+   * A special is created in place and must then fall like any other gem. If it is left
+   * hanging the fault is upstream of anything you can see — by the time it is obvious,
+   * gems have fallen past it and the state that caused it is gone. Stopping the clock
+   * here keeps that state on screen.
+   */
+  private _checkFloatingSpecial(at: Cell): void {
+    const svc = this._operations;
+    const cfg = this._config;
+    if (!svc || !cfg || !cfg.debugPauseOnFloatingSpecial) return;
+
+    const below = at.row + 1;
+    if (!svc.isPlayable(below) || svc.itemIdAt(below, at.col) >= 0) return;
+
+    // eslint-disable-next-line no-console
+    console.warn(`[match3] special created in the air at row=${at.row} col=${at.col} — cell below is empty. Board frozen; match3.play() to resume.`);
+    cfg.timeScale = 0;
+  }
+
   /** Hands colours back when a clear is abandoned before a chain takes them on. */
   private _dropColours(colours: number[]): void {
     for (const c of colours) this._firingColours.delete(c);
@@ -1168,6 +1200,7 @@ export class GameBoardsViewController extends GridsViewController {
       if (special) {
         svc.createSpecial(special.row, special.col, special.gemType, special.special);
         view.animateSpecialSpawn(gridId, special);
+        this._checkFloatingSpecial(special);
         wave = cells.filter((c) => c.row !== special.row || c.col !== special.col);
       }
       // Every cookie in this clear throws its bolts first and the gems go on impact —
