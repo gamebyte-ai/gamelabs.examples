@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import gsap from "gsap";
 import { vector } from "@js-basics/vector";
 import { AssetTypes, GamelabsApp, GameCameraBinding, GameCameraManager, GridsModel, LogTypes, ParticleManager, ParticlesBinding, TimelineBinding, TimelineManager, Topdown2dCameraController, UIComponentsBinding, UIEvents, SettingsBinding, SettingsBooleanField, SettingsNumberField, SettingsManager } from "@gamebyte/gamelabsjs";
 import { Match3AssetIds } from "./Match3AssetIds.js";
@@ -137,6 +138,15 @@ export class Match3App extends GamelabsApp {
       const toPlayable = (this._config.reserveRows / 2) * this._config.gridRowSize;
       grid.setPosition(vector(-offset.x, -offset.y, -offset.z - toPlayable));
     }
+    // Console handle, for watching the board a step at a time: `match3.slow(0.2)`,
+    // `match3.pause()`, `match3.play()`. `config` is the live instance, so anything
+    // else on it can be poked the same way — mind that most fields are only read once.
+    (window as unknown as { match3: object }).match3 = {
+      config: this._config,
+      slow: (scale: number) => (this._config.timeScale = scale),
+      pause: () => (this._config.timeScale = 0),
+      play: () => (this._config.timeScale = 1)
+    };
     // The module registers the manager; nothing ticks it for us, so the app does.
     this._particles = this.diContainer.getInstance(ParticleManager);
     this._timeline = this.diContainer.getInstance(TimelineManager);
@@ -173,12 +183,23 @@ export class Match3App extends GamelabsApp {
 
   protected override onStep(timestepSeconds: number): void {
     super.onStep(timestepSeconds);
-    this._cameraManager?.update(timestepSeconds);
-    this._particles?.update(timestepSeconds);
-    this._timeline?.update(timestepSeconds);
+    // Anything that stalls the loop — a paused debugger, a backgrounded tab, a long
+    // GC — hands the next frame one enormous step. The fall is INTEGRATED per frame,
+    // so a five-second step covers five seconds of gravity at once and every gem is
+    // simply already at the bottom when the frame ends. Clamping spends the stall in
+    // slow motion instead: time is lost, but nothing teleports.
+    const scale = Math.max(0, this._config.timeScale);
+    // gsap runs on its own ticker, so slowing our step alone would leave every tween
+    // (the pop, the swap, the bolts, the waves) at full speed while the board crawled.
+    // Set rather than assumed each frame: the console can change it at any moment.
+    if (gsap.globalTimeline.timeScale() !== scale) gsap.globalTimeline.timeScale(scale);
+    const step = Math.min(timestepSeconds, this._config.maxStepSec) * scale;
+    this._cameraManager?.update(step);
+    this._particles?.update(step);
+    this._timeline?.update(step);
     // Gem falls are integrated per frame rather than tweened, so that a gem retargeted
     // mid-fall keeps its speed instead of restarting from zero.
-    this._boardView?.stepFalls(timestepSeconds);
+    this._boardView?.stepFalls(step);
   }
 
   protected override preDestroy(): void {

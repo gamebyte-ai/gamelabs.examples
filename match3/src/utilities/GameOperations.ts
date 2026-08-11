@@ -85,10 +85,21 @@ export class GameOperations implements IInjectionTarget {
     return this._config.cols;
   }
 
+  /**
+   * The colour this cell matches on, or -1 for none.
+   *
+   * A cookie is COLOURLESS: it cannot be matched, it does not break or extend a line
+   * through it, and a colour clear does not sweep it up. It still carries a gemType
+   * internally — the visual uses it to pick a tint — but nothing on the board may read
+   * that as "this is a red gem", which is why the check lives here, at the one accessor
+   * every colour rule goes through, rather than being repeated at each of them.
+   *
+   * An empty cell answers -1 too: both mean "nothing here to match with".
+   */
   public gemTypeAt(row: number, col: number): number {
     const item = this._grid.getCell(col, row)?.item;
     if (!item || !(item instanceof GameBoardItem)) return -1;
-    return item.gemType;
+    return item.special === GemSpecial.ColorBomb ? -1 : item.gemType;
   }
 
   public isAdjacent(r1: number, c1: number, r2: number, c2: number): boolean {
@@ -220,6 +231,148 @@ export class GameOperations implements IInjectionTarget {
     return seen[Math.floor(Math.random() * seen.length)];
   }
 
+  /**
+   * The "+" two swapped stripes clear: every occupied playable cell on this cell's row
+   * and on its column.
+   *
+   * Deliberately not "each stripe sweeps its own axis" — two row-stripes swapped would
+   * then clear two parallel rows. The cross is anchored on the cell the swap landed on,
+   * whichever way the two gems happened to be striped.
+   *
+   * `wave` is the distance from the crossing, so the clear travels outward from the
+   * two stripes rather than taking the whole cross at once.
+   */
+  public plusCells(at: Cell): SweepCell[] {
+    const out: SweepCell[] = [];
+    for (let col = 0; col < this._config.cols; col++) {
+      out.push({ row: at.row, col, wave: Math.abs(col - at.col) });
+    }
+    for (let i = 0; i < this._config.rows; i++) {
+      const row = this._config.firstVisibleRow + i;
+      if (row !== at.row) out.push({ row, col: at.col, wave: Math.abs(row - at.row) });
+    }
+    return out.filter((c) => this.isPlayable(c.row) && this.itemIdAt(c.row, c.col) >= 0);
+  }
+
+  /**
+   * Where a `span`×`span` block centred on `at` actually sits. Pulled inside the
+   * playable window when the swap happened near an edge, so the block is always whole —
+   * a clipped one would clear fewer rows than columns and read as a bug.
+   */
+  public blockCentre(at: Cell, span: number): Cell {
+    const half = Math.floor(span / 2);
+    const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
+    return {
+      row: clamp(at.row, this._config.firstVisibleRow + half, this._config.lastVisibleRow - half),
+      col: clamp(at.col, half, this._config.cols - 1 - half)
+    };
+  }
+
+  /** Every cell of that block, whether or not it currently holds a gem. */
+  public blockCells(at: Cell, span: number): Cell[] {
+    const centre = this.blockCentre(at, span);
+    const half = Math.floor(span / 2);
+    const out: Cell[] = [];
+    for (let row = centre.row - half; row <= centre.row + half; row++) {
+      for (let col = centre.col - half; col <= centre.col + half; col++) {
+        if (this.isPlayable(row) && col >= 0 && col < this._config.cols) out.push({ row, col });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The occupied cells on the block's rows, or on its columns, end to end — the block's
+   * own cells included. While the item is still standing they are claimed, and the
+   * caller drops claimed cells anyway; once it has gone they are part of the line like
+   * any other cell, which is what makes the second wave clear its columns end to end.
+   *
+   * Every cell comes back at `wave` 0: all three lines go at once, so there is nothing
+   * to stagger within a wave. The gap between the two waves is the caller's business.
+   */
+  public bandCells(at: Cell, span: number, axis: "row" | "column"): SweepCell[] {
+    const centre = this.blockCentre(at, span);
+    const half = Math.floor(span / 2);
+    const out: SweepCell[] = [];
+    for (let i = -half; i <= half; i++) {
+      if (axis === "row") {
+        const row = centre.row + i;
+        for (let col = 0; col < this._config.cols; col++) {
+          if (this.isPlayable(row) && this.itemIdAt(row, col) >= 0) out.push({ row, col, wave: 0 });
+        }
+      } else {
+        const col = centre.col + i;
+        for (let row = this._config.firstVisibleRow; row <= this._config.lastVisibleRow; row++) {
+          if (this.itemIdAt(row, col) >= 0) out.push({ row, col, wave: 0 });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The occupied playable cells within `radius` of `at`, as a SQUARE — what two bombs
+   * going off together take.
+   *
+   * Not clamped like {@link blockCells}: a blast near an edge is clipped there rather
+   * than slid inward, so it stays centred on the cell the player swapped.
+   *
+   * `wave` is the ring the cell sits on (Chebyshev distance), so the clear travels
+   * outward from the middle a ring at a time instead of taking the square at once.
+   */
+  public areaCells(at: Cell, radius: number): SweepCell[] {
+    const out: SweepCell[] = [];
+    for (let row = at.row - radius; row <= at.row + radius; row++) {
+      if (!this.isPlayable(row)) continue;
+      for (let col = at.col - radius; col <= at.col + radius; col++) {
+        if (col < 0 || col >= this._config.cols) continue;
+        if (this.itemIdAt(row, col) < 0) continue;
+        out.push({ row, col, wave: Math.max(Math.abs(row - at.row), Math.abs(col - at.col)) });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Every occupied playable cell, waved by COLUMN — what two cookies traded with each
+   * other take: the whole board, sweeping left to right one column at a time.
+   */
+  public boardCellsLeftToRight(): SweepCell[] {
+    const out: SweepCell[] = [];
+    for (let col = 0; col < this._config.cols; col++) {
+      for (let row = this._config.firstVisibleRow; row <= this._config.lastVisibleRow; row++) {
+        if (this.itemIdAt(row, col) >= 0) out.push({ row, col, wave: col });
+      }
+    }
+    return out;
+  }
+
+  /** Takes an item off the board without scoring it — the giant removing itself. */
+  public removeItemAt(row: number, col: number): void {
+    if (!this.isPlayable(row)) return;
+    this._grid.setCellItem(col, row, null);
+  }
+
+  /** The up-to-8 playable cells around one, edges and the reserve excluded. */
+  public neighbourCells(row: number, col: number): Cell[] {
+    const out: Cell[] = [];
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const r = row + dr;
+        const c = col + dc;
+        if (c < 0 || c >= this._config.cols || !this.isPlayable(r)) continue;
+        out.push({ row: r, col: c });
+      }
+    }
+    return out;
+  }
+
+  /** How many of those neighbours currently hold a gem. */
+  public occupiedNeighbourCount(row: number, col: number): number {
+    return this.neighbourCells(row, col).filter((c) => this.itemIdAt(c.row, c.col) >= 0).length;
+  }
+
   /** Identity of the gem in a cell, or -1. Lets callers tell "same cell" from "same gem". */
   public itemIdAt(row: number, col: number): number {
     const item = this._grid.getCell(col, row)?.item;
@@ -237,12 +390,25 @@ export class GameOperations implements IInjectionTarget {
    * repeats — a stripe can uncover another stripe, and that one fires too. Returns
    * the closure, so the caller clears everything a single move sets off in one pass.
    */
-  public expandSpecialClears(cells: readonly Cell[], bombColors?: ReadonlyMap<string, number>): SweepCell[] {
+  public expandSpecialClears(
+    // Seeds may carry their own `wave` — a cross already knows how far each of its
+    // cells sits from the crossing. Anything without one starts the sweep at 0.
+    cells: readonly (Cell & { wave?: number })[],
+    bombColors?: ReadonlyMap<string, number>,
+    boosterReady?: (cell: Cell) => boolean,
+    // Reports each cookie that goes off and what it takes. The model has no business
+    // knowing about bolts, but it is the only place that knows WHICH cookie took WHICH
+    // gems — a caller that wants to draw the connection has nowhere else to get it.
+    onCookieFired?: (from: Cell, targets: readonly Cell[]) => void
+  ): SweepCell[] {
+    const deferred = new Set<string>();
     const key = (c: Cell): string => `${c.row},${c.col}`;
     const out = new Map<string, SweepCell>();
     const pending: SweepCell[] = [];
     for (const c of cells) {
-      const seed: SweepCell = { row: c.row, col: c.col, wave: 0 };
+      const seed: SweepCell = { row: c.row, col: c.col, wave: c.wave ?? 0 };
+      const seen = out.get(key(seed));
+      if (seen && seen.wave <= seed.wave) continue;
       out.set(key(seed), seed);
       pending.push(seed);
     }
@@ -257,23 +423,48 @@ export class GameOperations implements IInjectionTarget {
       // level — for a clear the player never sees.
       const visibleRows = this._config.rows;
       let swept: Cell[];
-      if (special === GemSpecial.ColorBomb) {
+      if (special === GemSpecial.Booster) {
+        // A booster waits for its neighbourhood to fill before going off. Until then it
+        // is left on the board entirely — not cleared with the match that lit it.
+        if (boosterReady && !boosterReady(cell)) {
+          deferred.add(key(cell));
+          continue;
+        }
+        swept = this.neighbourCells(cell.row, cell.col).filter((c) => this.itemIdAt(c.row, c.col) >= 0);
+      } else if (special === GemSpecial.ColorBomb) {
         // A swap names the colour (the gem it traded places with); anything else —
         // caught in a stripe, in a cascade — takes one from what is on the board.
         const named = bombColors?.get(key(cell));
-        const target = named ?? this.randomVisibleGemType();
-        swept = target < 0 ? [] : this.visibleCellsOfType(target);
+        if (named !== undefined) {
+          swept = this.visibleCellsOfType(named);
+        } else {
+          // Set off indirectly — caught in someone else's blast, with no partner to name
+          // a colour. It picks one from what is on the board and takes that colour whole,
+          // exactly as a swapped one would; only the choice of colour is different.
+          const colour = this.randomVisibleGemType();
+          swept = colour >= 0 ? this.visibleCellsOfType(colour) : [];
+        }
+        onCookieFired?.({ row: cell.row, col: cell.col }, swept);
+      } else if (special === GemSpecial.GiantStripe) {
+        // Runs its own two-wave routine and holds its block until it is done, so nothing
+        // here may sweep on its behalf. Its cell stays in the clear set like any gem.
+        continue;
       } else if (special === GemSpecial.StripedRow) {
         swept = Array.from({ length: this._config.cols }, (_, col) => ({ row: cell.row, col }));
       } else {
         swept = Array.from({ length: visibleRows }, (_, i) => ({ row: this._config.firstVisibleRow + i, col: cell.col }));
       }
 
+      // A stripe or a booster travels outward from where it stands, so its cells are
+      // numbered by distance. A cookie does not travel at all — it takes a COLOUR, and
+      // the gems it takes are scattered over the board with no line between them. Timing
+      // those by distance would trickle them in for no reason anyone could read, so they
+      // all go together, which is also when the bolts thrown at them land.
+      const spreads = special !== GemSpecial.ColorBomb;
       for (const s of swept) {
         if (!this._grid.getCell(s.col, s.row)?.item) continue;
-        // Distance from the gem that fired, so the clear reads as travelling outward.
         const distance = Math.abs(s.row - cell.row) + Math.abs(s.col - cell.col);
-        const wave = cell.wave + distance;
+        const wave = cell.wave + (spreads ? distance : 0);
         const k = key(s);
         const seen = out.get(k);
         if (seen && seen.wave <= wave) continue;
@@ -284,7 +475,8 @@ export class GameOperations implements IInjectionTarget {
       }
     }
     // Belt and braces: whatever fed the expansion, nothing outside the window leaves it.
-    return [...out.values()].filter((c) => this.isPlayable(c.row));
+    // A deferred booster is dropped so the match around it clears while it survives.
+    return [...out.values()].filter((c) => this.isPlayable(c.row) && !deferred.has(key(c)));
   }
 
   /** Replaces a cell's gem with a special one of the same colour. */
@@ -309,8 +501,15 @@ export class GameOperations implements IInjectionTarget {
    * is what lets two matches resolve side by side without touching each other's
    * gems — a column with no gaps is a no-op anyway, so the scoped and unscoped
    * results agree wherever they overlap.
+   *
+   * `isBlocked` marks cells another clear is in the middle of, and they behave as
+   * SOLID: the gem in one does not move, an empty one is not filled, and neither lets
+   * a gem pass through. Without it a staggered clear falls apart — the pass is
+   * board-wide, so one chain's gravity would drag gems into the cells another chain
+   * had already popped but not yet reached the end of, and that chain's remaining
+   * steps would then clear whatever had slid in.
    */
-  public applyGravity(onlyCols?: ReadonlySet<number>): GravityMove[] {
+  public applyGravity(onlyCols?: ReadonlySet<number>, isBlocked?: (row: number, col: number) => boolean): GravityMove[] {
     const rows = this._config.totalRows;
     const cols = this._config.cols;
     const moves: GravityMove[] = [];
@@ -318,6 +517,12 @@ export class GameOperations implements IInjectionTarget {
       if (onlyCols && !onlyCols.has(col)) continue;
       let write = rows - 1;
       for (let row = rows - 1; row >= 0; row--) {
+        // A blocked cell ends the segment: gems above it rest ON it rather than
+        // falling past, exactly as they would on a gem that is still there.
+        if (isBlocked?.(row, col)) {
+          write = row - 1;
+          continue;
+        }
         const cell = this._grid.getCell(col, row);
         if (!cell?.item) continue;
         const item = cell.item;
@@ -333,13 +538,21 @@ export class GameOperations implements IInjectionTarget {
     return moves;
   }
 
-  /** Fills empty cells with fresh gems. `onlyCols` scopes it, as in {@link applyGravity}. */
-  public refillEmpty(onlyCols?: ReadonlySet<number>): RefillSpawn[] {
+  /**
+   * Fills empty cells with fresh gems. `onlyCols` scopes it, as in {@link applyGravity};
+   * `isBlocked` means the same thing there and here.
+   *
+   * New gems enter from above, so a blocked cell stops the column: everything under it
+   * is unreachable this pass and stays empty until the clear holding it finishes. Filling
+   * past it would have gems appear out of nowhere BELOW something still being popped.
+   */
+  public refillEmpty(onlyCols?: ReadonlySet<number>, isBlocked?: (row: number, col: number) => boolean): RefillSpawn[] {
     const n = this._config.gemTypeCount;
     const spawns: RefillSpawn[] = [];
     for (let col = 0; col < this._config.cols; col++) {
       if (onlyCols && !onlyCols.has(col)) continue;
       for (let row = 0; row < this._config.totalRows; row++) {
+        if (isBlocked?.(row, col)) break;
         const cell = this._grid.getCell(col, row);
         if (cell?.item) continue;
         const t = Math.floor(Math.random() * n);
@@ -383,6 +596,50 @@ export class GameOperations implements IInjectionTarget {
       this._resolveAllMatchesSync();
     }
     this._gameModel.resetScore();
+    this._applyDebugGemTypeLimit();
+    if (this._config.debugSeedBoosters) this._seedBoosterPair();
+  }
+
+  /**
+   * Thins one colour down to a fixed count across the PLAYABLE window, recolouring the
+   * rest. Replacements avoid making a triple, so the board still opens without a match
+   * already on it.
+   */
+  private _applyDebugGemTypeLimit(): void {
+    const limit = this._config.debugLimitGemType;
+    if (limit.count < 0) return;
+
+    let seen = 0;
+    for (let row = this._config.firstVisibleRow; row <= this._config.lastVisibleRow; row++) {
+      for (let col = 0; col < this._config.cols; col++) {
+        if (this.gemTypeAt(row, col) !== limit.gemType) continue;
+        if (seen++ < limit.count) continue;
+
+        for (let guard = 0; guard < 30; guard++) {
+          const t = Math.floor(Math.random() * this._config.gemTypeCount);
+          if (t === limit.gemType || this._wouldCreateTripleAt(col, row, t)) continue;
+          this._grid.setCellItem(col, row, this._createItem(t));
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * Drops a cookie next to a stripe in the middle of the board. Purely a test aid —
+   * waiting for both to occur naturally makes the pairing slow to try.
+   */
+  private _seedBoosterPair(): void {
+    const row = this._config.firstVisibleRow + Math.floor(this._config.rows / 2);
+    const col = Math.max(0, Math.floor(this._config.cols / 2) - 1);
+    if (col + 1 >= this._config.cols) return;
+
+    // Two cookies side by side: swapping them takes the whole board, left to right.
+    // Their colour is never read — a cookie is colourless — but one is still stored, so
+    // it takes the colour the debug limit thins out like the other seeds did.
+    const type = this._config.debugLimitGemType.gemType;
+    this.createSpecial(row, col, type, GemSpecial.ColorBomb);
+    this.createSpecial(row, col + 1, type, GemSpecial.ColorBomb);
   }
 
   private _resolveAllMatchesSync(): void {
@@ -441,10 +698,9 @@ export class GameOperations implements IInjectionTarget {
     return false;
   }
 
+  /** Column-first spelling of {@link gemTypeAt}, which the match scans read through. */
   private _gemAt(col: number, row: number): number {
-    const item = this._grid.getCell(col, row)?.item;
-    if (!item || !(item instanceof GameBoardItem)) return -1;
-    return item.gemType;
+    return this.gemTypeAt(row, col);
   }
 
   private _findMatchCells(): { row: number; col: number }[] {

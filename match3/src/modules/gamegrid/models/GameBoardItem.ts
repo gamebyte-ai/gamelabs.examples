@@ -15,7 +15,18 @@ export enum GemSpecial {
    * The cookie. Swap it with a gem and every gem of that colour on the board goes;
    * set it off some other way and it picks a colour from what is on screen.
    */
-  ColorBomb = 3
+  ColorBomb = 3,
+  /**
+   * Booster, earned by an L/T match. Its ability is not defined yet — for now it
+   * clears like any other gem; only its creation, look and pop order are in place.
+   */
+  Booster = 4,
+  /**
+   * Bomb + stripe merged: one item covering a square block of cells. It clears the rows
+   * it covers, then the columns, then goes. Only ever made by that swap — no match
+   * produces one.
+   */
+  GiantStripe = 5
 }
 
 /**

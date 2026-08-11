@@ -19,6 +19,13 @@ export interface GemStripeOptions {
   readonly stripeGap: number;
 }
 
+/** Look of the booster mark — see `Match3Config.booster`. */
+export interface GemBoosterOptions {
+  readonly label: string;
+  readonly labelColor: number;
+  readonly labelScale: number;
+}
+
 export class GameBoardItemObjectOptions extends GridItemObjectOptions {
   public readonly gemType: number;
   /**
@@ -30,6 +37,9 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
   /** What this gem does when cleared; also what the stripe marks below depict. */
   public readonly special: GemSpecial;
   public readonly stripe: GemStripeOptions;
+  public readonly booster: GemBoosterOptions;
+  /** Cells a merged bomb+stripe covers — how many times oversize to draw it. */
+  public readonly giantSpanCells: number;
 
   public constructor(
     itemId: number,
@@ -37,12 +47,16 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
     gemType: number,
     shadow: GemShadowOptions,
     special: GemSpecial,
-    stripe: GemStripeOptions
+    stripe: GemStripeOptions,
+    booster: GemBoosterOptions,
+    giantSpanCells: number
   ) {
     super(itemId, gridPreset);
     this.gemType = gemType;
     this.shadow = shadow;
     this.special = special;
     this.stripe = stripe;
+    this.booster = booster;
+    this.giantSpanCells = giantSpanCells;
   }
 }

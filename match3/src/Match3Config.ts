@@ -8,29 +8,18 @@ export class Match3Config {
   /** Shared by Three.js gems and tuning (`gemTypeCount` should not exceed palette length). */
   public static readonly GEM_PALETTE: readonly number[] = [0xe11d48, 0x3b82f6, 0x22c55e, 0xeab308, 0xa855f7];
   /**
-   * Draw a plane under each cell. Off by default for the flat board look (scene
-   * backdrop + one outline around the whole grid); turn it on to see the
-   * framework's `GridCellObject.createVisual()` path in action.
-   *
-   * Static, not an instance field, because the grid module builds cell objects
-   * without DI access — which also means it canNOT come from `game-config.json`.
+   * Draw a plane under each cell. Off for the flat look; on to see the framework's
+   * `GridCellObject.createVisual()` path. Static because cell objects are built without
+   * DI — so `game-config.json` cannot reach it.
    */
   public static readonly SHOW_CELL_PLANES = false;
-  /**
-   * Level table. Each entry is a whole board setup; {@link level} picks one at boot.
-   *
-   * Static because the board is built once, in `GameOperations.inject()`, from whichever
-   * entry is active — there is nothing to re-read afterwards.
-   */
+  /** Board setups; {@link level} picks one at boot. The grid is built once, from it. */
   public static readonly LEVELS: readonly { rows: number; cols: number; gemTypeCount: number; goal: number }[] = [
     { rows: 8, cols: 8, gemTypeCount: 4, goal: 60 },
-    { rows: 8, cols: 6, gemTypeCount: 3, goal: 40 }
+    { rows: 8, cols: 8, gemTypeCount: 3, goal: 40 }
   ];
 
-  /**
-   * Which level to play, 1-based. An instance field on purpose, so it can be set from
-   * `game-config.json` — switching level needs no rebuild. Out-of-range values clamp.
-   */
+  /** 1-based. An instance field so `game-config.json` can switch it; clamped in range. */
   public readonly level = 2;
 
   private get _level(): { rows: number; cols: number; gemTypeCount: number; goal: number } {
@@ -38,11 +27,7 @@ export class Match3Config {
     return Match3Config.LEVELS[index];
   }
 
-  /**
-   * Board shape, read from the active level. Getters rather than fields so they cannot
-   * drift from {@link level} — which also puts them beyond the override channel's
-   * reach: change `level`, not these.
-   */
+  /** Board shape from the active level. Getters, so they cannot drift from it. */
   public get rows(): number {
     return this._level.rows;
   }
@@ -60,12 +45,20 @@ export class Match3Config {
     return this._level.goal;
   }
   /**
-   * Rows of pre-generated gems stacked ABOVE the playable window. They are real
-   * cells in the same grid, so gravity pulls them down on its own — no separate
-   * "spawn from nowhere" path. The level is authored at boot; as the reserve drains,
-   * the ordinary refill tops it back up, which keeps it endless.
+   * Gems stacked above the playable window. Real cells in the same grid, so gravity
+   * draws them down on its own; refill tops the stack back up, keeping it endless.
    */
   public readonly reserveRows = 40;
+  /**
+   * Test aid: cap how many gems of one colour the board starts with, so a specific
+   * colour is easy to hunt for. `count: -1` leaves the board alone.
+   */
+  public readonly debugLimitGemType = {
+    gemType: 3,
+    count: 7
+  };
+  /** Test aid: start with a stripe beside a bomb, to try their combination. */
+  public readonly debugSeedBoosters = true;
   /** Clip rendering to the board. Off while testing, to see the reserve stacked above. */
   public readonly clipToBoard = false;
 
@@ -82,22 +75,33 @@ export class Match3Config {
   public get lastVisibleRow(): number {
     return this.totalRows - 1;
   }
+  /**
+   * Ceiling on one frame's timestep, in seconds. Everything integrated per frame — the
+   * fall above all — is advanced by at most this much however long the frame actually
+   * took, so a stalled loop (paused debugger, background tab, long GC) resumes where it
+   * left off instead of jumping a second of gravity in a single step.
+   *
+   * ~3 frames at 60Hz. Raising it lets stalls through; lowering it makes a genuinely
+   * slow frame run in slow motion.
+   */
+  public readonly maxStepSec = 0.05;
+  /**
+   * Global time scale. 1 is normal, 0.2 is fifth speed, 0 freezes the board. Everything
+   * timed goes through it: the per-frame fall, gsap's tweens (pop, swap, bolts, waves)
+   * and the sweep's own delays — so the board slows down as one piece rather than
+   * drifting out of step with itself.
+   *
+   * NOT readonly, and the one field here meant to be written at runtime:
+   * `match3.slow(0.2)` from the console (see {@link Match3App}).
+   */
+  public timeScale = 1;
   /** World cell size for {@link RectGridPreset} (Three.js board). */
   public readonly gridColumnSize = 0.92;
   public readonly gridRowSize = 0.92;
   /**
-   * Top-down ortho framing. `ortho*` is the frustum HEIGHT in world units — the
-   * visible vertical extent; the visible width is always `height × aspect`, so a
-   * bigger value zooms OUT (board looks smaller). The board is ~7.6 wide with its
-   * outline.
-   *
-   * The height lerps with the viewport aspect and is pinned outside the band: at
-   * `minAspect` (narrowest screen) it sits at `orthoAtMin` so the board shrinks
-   * and stays inside the side edges; as the screen widens the board scales up
-   * until `maxAspect`, past which it holds at `orthoAtMax`.
-   *
-   * Defaults keep the board at ~92% of the screen width at BOTH ends of the band
-   * (7.6 / 0.92 ÷ aspect), which is what makes it read as edge-pinned.
+   * Top-down ortho framing. `ortho*` is frustum HEIGHT in world units; width follows as
+   * `height × aspect`, so a bigger value zooms OUT. The height lerps across the aspect
+   * band and pins outside it, keeping the board near 92% of screen width at both ends.
    */
   public readonly camera = {
     minAspect: 9 / 23, // narrow end of the band (matches viewport.minAspect)
@@ -105,12 +109,13 @@ export class Match3Config {
     orthoAtMin: 19.4, // frustum height at minAspect (narrow → zoomed out, board smaller)
     orthoAtMax: 11 // frustum height at maxAspect (wide → zoomed in, board bigger)
   };
-  /** Letterbox / pillarbox fit for the whole render surface. The viewport fills
-   * the mount while its aspect stays within [minAspect, maxAspect]; outside that
-   * band it's contained (black bars).
+  /**
+   * Letterbox fit. The canvases fill the mount while the aspect stays inside the band,
+   * and are contained (black bars) outside it.
    *
-   * NOTE: read once in the `Match3App` constructor, which runs before runtime
-   * overrides land — so this one canNOT be changed from `game-config.json`. */
+   * Read in the `Match3App` constructor, which runs before overrides land — so
+   * `game-config.json` cannot change it.
+   */
   public readonly viewport: ViewportConfig = {
     fit: "contain",
     minAspect: 9 / 23, // tallest/narrowest portrait phones fill (no bars)
@@ -121,11 +126,7 @@ export class Match3Config {
     maxAspect: 2.2,
     background: "#000000"
   };
-  /**
-   * Scene backdrop — everything outside the board. Distinct from both the letterbox
-   * bars (those take the mount colour, see {@link viewport}) and the board's own
-   * panel below.
-   */
+  /** Everything outside the board. Not the letterbox bars — those are `viewport`. */
   public readonly backgroundColor = 0xdae7f1;
   /** The grid's own panel, filling the board under the gems. */
   public readonly boardBackgroundColor = 0x6b8fb5;
@@ -139,12 +140,8 @@ export class Match3Config {
   public readonly boardOutlinePadding = 0.12;
 
   /**
-   * Outer board size in world units, outline padding included. Derived rather than
-   * stored so it cannot drift from the fields it is built from — the outline mesh,
-   * the backdrop panel, and the render clipping planes all measure from here.
-   *
-   * A getter also keeps it out of `game-config.json`'s reach: overrides only touch
-   * own properties, and these live on the prototype.
+   * Outer board size, outline padding included. Derived so the outline, the panel and
+   * the clipping planes cannot drift apart. Getters are invisible to overrides.
    */
   public get boardWidth(): number {
     return this.cols * this.gridColumnSize + this.boardOutlinePadding * 2;
@@ -154,24 +151,15 @@ export class Match3Config {
     return this.rows * this.gridRowSize + this.boardOutlinePadding * 2;
   }
 
-  /**
-   * This level's board size relative to the one the camera band was tuned against
-   * (level 1). The framing multiplies by it, so a 6x6 board fills the screen the way
-   * an 8x8 does instead of sitting small in the middle of it.
-   */
+  /** Board size relative to level 1, which the camera band was tuned against. */
   public get cameraBoardScale(): number {
     const reference = Match3Config.LEVELS[0];
     return this.boardWidth / (reference.cols * this.gridColumnSize + this.boardOutlinePadding * 2);
   }
   /**
-   * Soft drop shadow behind each gem, to give the flat quads some depth. Drawn as a
-   * radial black gradient generated at runtime (no asset), parented to the gem so it
-   * scales and pops with it.
-   *
-   * `scale` is relative to the gem quad, `offset*` are world units in the board
-   * plane — with a straight top-down camera the offset is what reads as height above
-   * the board. `softness` is where the gradient starts fading (0 = fades from the
-   * centre, 1 = solid disc with a hard edge). `opacity` 0 disables it entirely.
+   * Drop shadow behind each gem: a radial gradient generated at runtime, parented to
+   * the gem. Under a top-down camera the offset is what reads as height. `softness` is
+   * where the fade starts (0 = from the centre, 1 = hard edge); `opacity` 0 disables it.
    */
   public readonly gemShadow = {
     opacity: 0.15,
@@ -181,13 +169,9 @@ export class Match3Config {
     softness: 0.35
   };
   /**
-   * The pop sound climbs a step per match while a cascade keeps going, then holds at
-   * the top — the classic match-3 tell that a chain is still running.
-   *
-   * `step` is added to the playback rate each time, which raises pitch and speed
-   * together. `maxSteps` caps it: past that the pops all sound at the highest pitch
-   * rather than turning into chirps. The ladder resets once the board goes quiet, so
-   * every new move starts from the base note.
+   * The pop climbs a step per match through a cascade, then holds. `step` is added to
+   * the playback rate (pitch and speed together); `maxSteps` caps it so it never turns
+   * into a chirp. Resets once the board goes quiet.
    */
   public readonly popPitch = {
     step: 0.08,
@@ -203,14 +187,51 @@ export class Match3Config {
    * Two conventions exist in the genre and they feel quite different — kept as a
    * flag so it can be decided by eye rather than by assertion.
    */
-  public readonly special = {
-    /** Off while testing: 4- and 5-runs clear normally and leave nothing behind. */
-    enabled: false,
-    minRunLength: 4,
+  /**
+   * Booster 1, earned by an L/T match of `minCells`..`maxCells` gems. It appears at the
+   * junction the two runs share, and the clear collapses inward toward it. Cleared, it
+   * takes its 8 neighbours. Separate from {@link special} so each can be toggled alone.
+   */
+  public readonly booster = {
+    enabled: true,
+    minCells: 5,
+    maxCells: 6,
+    /** Mark drawn on the gem. */
+    label: "B",
+    labelColor: 0xffffff,
+    /** Label size as a fraction of the gem quad. */
+    labelScale: 0.66,
     /**
-     * Run length that earns a cookie instead of a stripe. Anything from here up — 5,
-     * 6, 7 — produces the same thing; the board is 8 wide, so that is the whole range.
+     * Neighbours that must be filled before it goes off. 0 = never waits; 8 = holds for
+     * a full ring, pulsing until then. Clamped to the neighbours a cell actually has,
+     * so an edge (5) or corner (3) booster still fires.
      */
+    minNeighbours: 0,
+    /** One pulse, in seconds: white and back. Lower is a more urgent flash. */
+    blinkStepSec: 0.2,
+    /**
+     * Two bombs swapped: instead of one taking its ring and the other going with it,
+     * they go off together over a square of this radius around the swap. 1 would be the
+     * ordinary 3x3 blast; 2 is 5x5, 3 is 7x7. Clipped at the board edge rather than
+     * shifted inward — a bomb in the corner takes the quarter it can reach.
+     */
+    pairRadius: 2,
+    /** Cookie + booster: gap between the converted boosters going off, in seconds. */
+    chainDelaySec: 0.18,
+    /** Pause after everything turns into a booster, before the first one goes off. */
+    chainStartDelaySec: 0.6
+  };
+  public readonly special = {
+    /** Booster 1 lives in `booster`; these two are the straight-run specials. */
+    stripesEnabled: true,
+    /**
+     * Booster 2 — the cookie, from a straight run of `minCookieRunLength`+. Swapped with
+     * a gem it clears that whole colour; set off any other way it takes one gem at
+     * random.
+     */
+    cookieEnabled: true,
+    minRunLength: 4,
+    /** Run length that earns a cookie instead of a stripe; anything longer is the same. */
     minCookieRunLength: 5,
     alongMatch: true,
     /** Stripe marks drawn over the gem, in gem-quad fractions. */
@@ -218,28 +239,126 @@ export class Match3Config {
     stripeOpacity: 0.85,
     stripeThickness: 0.13,
     stripeGap: 0.22,
-    /**
-     * Seconds between one step of a sweep and the next. A striped gem clears outward
-     * from itself: the cell beside it goes first, then the next, and so on. 0 clears
-     * the whole line at once.
-     */
-    sweepStepSec: 0.04
+    /** Seconds between steps of a sweep, so a line clears outward. 0 = all at once. */
+    sweepStepSec: 0.06
   };
   /**
-   * Camera shake, run as a `CameraShakeTrack` on the framework's timeline. Fires when a
-   * single clear is big enough to be worth punctuating — a long sweep or a chunky
-   * cascade step. `minCells: 0` disables it.
+   * The bolt a swapped cookie throws at every gem it is about to take. The gems pop on
+   * impact, so `strikeSec` delays the clear by exactly that much — it is the wind-up,
+   * not decoration over the top of it. `strikeSec: 0` removes the effect entirely.
    */
+  public readonly cookieBeam = {
+    strikeSec: 0.14,
+    /** How long the spent bolt lingers after impact. Runs after the gems are gone. */
+    fadeSec: 0.12,
+    color: 0x9be8ff,
+    /** Bolt width in world units. Each one varies a little around this. */
+    thickness: 0.06,
+    opacity: 0.9,
+    /** Opacity wobbles this many times on the way out — what makes it read as electric. */
+    flickers: 3
+  };
+  /**
+   * The white wave a firing stripe throws BOTH ways down its line. It carries straight
+   * on past the board and off the screen rather than stopping at the edge, so it reads
+   * as a shockwave rather than a lit-up row. `speedCellsPerSec: 0` disables it.
+   */
+  public readonly stripeWave = {
+    enabled: true,
+    color: 0xffffff,
+    opacity: 0.85,
+    /** Depth along the direction of travel, in cells. */
+    lengthCells: 0.35,
+    /** Width across the lane, in cells. 1 is exactly one cell wide. */
+    widthCells: 1,
+    /** Cells beyond the board's edge it keeps travelling before it is dropped. */
+    overshootCells: 10,
+    /** Only used when the sweep is instant (`special.sweepStepSec: 0`) — see below. */
+    fallbackCellsPerSec: 26
+  };
+
+  /**
+   * Wave speed, DERIVED from the clear rather than set on its own: the sweep pops one
+   * cell every `special.sweepStepSec`, so a wave covering one cell in the same time
+   * arrives exactly as each gem goes. Tuning the sweep retimes the wave with it, and
+   * the two can never drift apart into a wave that outruns the pops or trails them.
+   *
+   * An instant sweep has no pace to follow, so it falls back to a fixed speed.
+   */
+  public get stripeWaveCellsPerSec(): number {
+    return this.special.sweepStepSec > 0 ? 1 / this.special.sweepStepSec : this.stripeWave.fallbackCellsPerSec;
+  }
+  /**
+   * Bomb + stripe: instead of both going off, they MERGE into a single item covering a
+   * `spanCells` × `spanCells` block at the swap. The old gems under it are gone and the
+   * block counts as filled — nothing falls into it or refills it while the item lives.
+   *
+   * Then its rows clear, all of them at once and end to end; `waveGapSec` later the item
+   * pops and its columns go with it; and once that wave is done the block is released
+   * and fills normally.
+   *
+   * `spanCells` is the mechanic, not a look: 3 means a 3x3 block, three rows and three
+   * columns. Even numbers have no centre cell, so keep it odd.
+   */
+  public readonly giant = {
+    enabled: true,
+    spanCells: 3,
+    /** Between the row wave and the column wave, which the item pops along with. */
+    waveGapSec: 0,
+    /** After the last wave, before the empty block is let go and refills. */
+    endHoldSec: 0
+  };
+  /**
+   * Pacing per COMBINATION. Every clear runs in steps and some of them throw bolts;
+   * these are the two numbers that time one, and each combination owns its own pair so
+   * tuning the cookie pair cannot touch the bomb pair.
+   *
+   * - `stepSec` — between one step of that clear and the next. What a "step" is differs
+   *   per combination: a column for the cookie pair, a ring for the bomb pair, a shell
+   *   of the cross for the stripe pair.
+   * - `beamSec` — how long that combination's bolts take to fly. A fixed effect length:
+   *   it is spent once as a lead-in and never folded into `stepSec`, so making a clear
+   *   quicker does not make its bolts quicker.
+   *
+   * Anything NOT a combination — an ordinary match, a lone special going off — uses the
+   * shared {@link special}.sweepStepSec and {@link cookieBeam}.strikeSec.
+   */
+  public readonly combos = {
+    /** Cookie + gem: that colour goes at once, so only the bolts are really timed. */
+    cookieGem: { stepSec: 0.04, beamSec: 0.18 },
+    /** Cookie + cookie: the whole board, column by column from the left. */
+    cookiePair: { stepSec: 0.08, beamSec: 0.3 },
+    /** Bomb + bomb: one square blast, ring by ring. */
+    bombPair: { stepSec: 0.05, beamSec: 0.18 },
+    /** Stripe + stripe: the cross, outward from the crossing. */
+    stripePair: { stepSec: 0.04, beamSec: 0.18 },
+    /** Bomb + stripe: each of the merged item's two waves, rows then columns. */
+    giant: { stepSec: 0.03, beamSec: 0.18 }
+  };
+  /**
+   * The ring that marks contact on a swap — one on each of the two cells, growing and
+   * fading out. Purely decoration: it is fired as the gems start trading places and
+   * nothing waits for it.
+   */
+  public readonly swapPulse = {
+    enabled: true,
+    color: 0xffffff,
+    /** Opacity it starts at. It fades to nothing over `sec`. */
+    opacity: 0.55,
+    /** Diameter at the start and at the end, in cells. */
+    fromCells: 0.45,
+    toCells: 1.5,
+    sec: 0.35,
+    /** Ring width as a fraction of its radius. 1 fills it in — a disc rather than a ring. */
+    thickness: 0.22
+  };
+  /** Shake on a clear of at least `minCells`, as a timeline track. 0 disables it. */
   public readonly shake = {
     minCells: 0,
     amplitude: 0.12,
     duration: 0.22
   };
-  /**
-   * The burst a popping gem throws off, run through the framework's particle module —
-   * which owns pooling and a global budget, so a heavy cascade cannot spawn unbounded
-   * meshes. `count: 0` disables the effect.
-   */
+  /** Pop burst, via the framework's pooled emitter. `count: 0` disables it. */
   public readonly popParticles = {
     count: 0,
     /** Outward speed in world units per second. */
@@ -249,11 +368,7 @@ export class Match3Config {
     /** Board-wide ceiling handed to `ParticlesBinding`. */
     budget: 600
   };
-  /**
-   * Pointer travel (screen px) that separates a swipe from a tap. Below it the
-   * press selects/deselects a gem; at or above it the gem swaps with its
-   * neighbour in the dominant drag direction.
-   */
+  /** Pointer travel (px) separating a swipe from a tap. */
   public readonly swipeMinDistancePx = 24;
   public readonly scorePerGem = 10;
   public readonly gemColors: readonly number[] = Match3Config.GEM_PALETTE;
@@ -280,7 +395,7 @@ export class Match3Config {
   /** Bounce-and-return when a swap makes no match. Half out, half back. */
   public readonly animInvalidSwapSec = 0.3;
   /** Pop: the gem shrinks away. Overlaps the fall, so it costs no wait. */
-  public readonly animPopSec = 0;
+  public readonly animPopSec = 0.25;
   /**
    * Easing for the pop. An `*.out` curve shrinks fastest at the start, so the gem
    * reads as reacting the instant it is matched; `*.in` would hold it at full size
@@ -288,18 +403,21 @@ export class Match3Config {
    */
   public readonly animPopEase = "power2.out";
   /**
-   * Downward acceleration, in cells per second squared. Gems fall under it rather
-   * than at a fixed speed: the duration works out to `sqrt(2 * distance / accel)`, so
-   * a long drop picks up more speed than a short one — the same acceleration for all
-   * of them, which is what reads as gravity.
-   *
-   * Raise it for a heavier, snappier board; lower it for a floaty one.
+   * Downward acceleration in cells/s². Every gem falls under the same one, so a long
+   * drop picks up more speed than a short one. Higher is heavier and snappier.
    */
-  public readonly fallAccelCellsPerSec2 = 2;
+  public readonly fallAccelCellsPerSec2 = 12;
   /**
-   * The single small bounce on landing. `cells` is how far the gem rebounds, as a
-   * fraction of a cell; `sec` is the whole bounce, up and back down. `cells: 0`
-   * removes it.
+   * Extra cells above the column that refilled gems start from. Under constant
+   * acceleration a longer drop arrives faster, so this is the knob for how briskly new
+   * gems come in. It is also a floor: a gem never starts inside the airspace of one
+   * already falling in that column.
+   */
+  public readonly spawnLiftCells = 1;
+  /**
+   * Landing dip: the gem goes `cells` PAST its cell and back over `sec`, at a fixed
+   * size whatever the drop. Cosmetic — it counts as arrived on first touch, so matches
+   * never wait for it. `cells: 0` removes it.
    */
   public readonly fallBounce = {
     cells: 0,

@@ -73,6 +73,37 @@ function cookieTexture(colors: readonly number[]): THREE.Texture {
   return COOKIE_TEXTURE;
 }
 
+/**
+ * Letter marks for booster gems, drawn into a canvas once and shared by key. Text is
+ * the one thing three.js has no primitive for, so it comes through a texture.
+ */
+const LABEL_TEXTURES = new Map<string, THREE.Texture>();
+
+function labelTexture(label: string, color: number): THREE.Texture {
+  const key = `${label}:${color}`;
+  const cached = LABEL_TEXTURES.get(key);
+  if (cached) return cached;
+
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = `bold ${size * 0.78}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // Dark outline first, so the letter holds up over any gem colour.
+  ctx.lineWidth = size * 0.09;
+  ctx.strokeStyle = "rgba(15,23,42,0.9)";
+  ctx.strokeText(label, size / 2, size * 0.54);
+  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.fillText(label, size / 2, size * 0.54);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  LABEL_TEXTURES.set(key, texture);
+  return texture;
+}
+
 export class GameBoardItemObject extends GridItemObject {
   private static readonly SELECTION_ACCENT = 0xfbbf24;
   private static readonly SELECTION_SCALE = 1.1;
@@ -81,6 +112,8 @@ export class GameBoardItemObject extends GridItemObject {
   private static readonly SHADOW_Y = 0.045;
   /** Just above the gem quad so the marks read over the gem art. */
   private static readonly STRIPE_Y = 0.065;
+  /** How faint the gem gets at the bottom of a waiting pulse. */
+  private static readonly PULSE_MIN_OPACITY = 0.25;
 
   public declare readonly preset: RectGridPreset;
 
@@ -95,7 +128,11 @@ export class GameBoardItemObject extends GridItemObject {
   protected override createVisual(): void {
     const options = this._options as GameBoardItemObjectOptions;
     const gemType = options.gemType;
-    const size = Math.min(this.preset.columnSize, this.preset.rowSize) * 0.78;
+    // A merged bomb+stripe covers a whole block of cells, so it is drawn that many
+    // times oversize. Everything below — shadow, stripes, halo — measures from `size`,
+    // so the one factor scales the item as a piece.
+    const span = options.special === GemSpecial.GiantStripe ? Math.max(1, options.giantSpanCells) : 1;
+    const size = Math.min(this.preset.columnSize, this.preset.rowSize) * 0.78 * span;
 
     // Shadow first, so it is behind the gem in both height and draw order. Offsetting
     // it in the board plane is what reads as the gem floating above the board under a
@@ -117,9 +154,11 @@ export class GameBoardItemObject extends GridItemObject {
       this._shadow = shadow;
     }
 
+    const isBooster = options.special === GemSpecial.Booster;
     const isCookie = options.special === GemSpecial.ColorBomb;
-    // Stripes describe a sweep direction; a cookie has none, its face says what it is.
-    if (!isCookie) this._createStripes(options, size);
+    // Stripes describe a sweep direction; neither a cookie nor a booster has one — their
+    // faces say what they are.
+    if (!isCookie && !isBooster) this._createStripes(options, size);
 
     // Gem texture quad — or the cookie face, which is generated rather than loaded.
     const assetId = GEM_ASSET_IDS_BY_TYPE[gemType % GEM_ASSET_IDS_BY_TYPE.length];
@@ -128,6 +167,14 @@ export class GameBoardItemObject extends GridItemObject {
       : assetId
         ? this._assetManager?.getAsset<THREE.Texture>(assetId) ?? null
         : null;
+
+    if (import.meta.env.DEV && !isCookie && !texture) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[match3] createVisual could not resolve a gem texture — assetId=${assetId} ` +
+          `assetManager=${this._assetManager ? "present" : "NULL"}`
+      );
+    }
 
     const geom = new THREE.PlaneGeometry(size, size);
     const mat = new THREE.MeshBasicMaterial({
@@ -160,6 +207,27 @@ export class GameBoardItemObject extends GridItemObject {
     halo.renderOrder = 99;
     this.add(halo);
     this._selectionHalo = halo;
+
+    if (isBooster) this._createBoosterLabel(options, size);
+  }
+
+  /** The booster's letter, sitting over the gem art so it stays legible. */
+  private _createBoosterLabel(options: GameBoardItemObjectOptions, size: number): void {
+    const booster = options.booster;
+    if (!booster || booster.labelScale <= 0) return;
+
+    const side = size * booster.labelScale;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(side, side),
+      new THREE.MeshBasicMaterial({
+        map: labelTexture(booster.label, booster.labelColor),
+        transparent: true,
+        depthWrite: false
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(0, GameBoardItemObject.STRIPE_Y, 0);
+    this.add(mesh);
   }
 
   /**
@@ -172,7 +240,8 @@ export class GameBoardItemObject extends GridItemObject {
     if (special === GemSpecial.None) return;
 
     const stripe = options.stripe;
-    const alongRow = special === GemSpecial.StripedRow;
+    // The merged item is a stripe drawn large; its bars run the same way a row stripe's do.
+    const alongRow = special === GemSpecial.StripedRow || special === GemSpecial.GiantStripe;
     const thickness = size * stripe.stripeThickness;
     const material = new THREE.MeshBasicMaterial({
       color: stripe.stripeColor,
@@ -197,6 +266,24 @@ export class GameBoardItemObject extends GridItemObject {
   /** The gem's colour index, for effects that need to match it (the pop burst). */
   public get gemType(): number {
     return (this._options as GameBoardItemObjectOptions).gemType;
+  }
+
+  /**
+   * Fades the gem for the waiting pulse: `amount` 0 leaves it untouched, 1 takes it to
+   * `PULSE_MIN_OPACITY`. `null` restores it.
+   *
+   * Straight on the gem's own material — no overlay. An additive layer was tried first,
+   * to flash it white, but that needs the gem texture as a silhouette mask; wherever the
+   * texture was missing it degenerated into a white square and lit the whole cell.
+   * Opacity has no such dependency and works for every gem.
+   */
+  public setTint(amount: number | null): void {
+    const material = this._mesh?.material as THREE.MeshBasicMaterial | undefined;
+    if (!material) return;
+
+    const t = amount === null ? 0 : Math.max(0, Math.min(1, amount));
+    material.transparent = true;
+    material.opacity = 1 - t * (1 - GameBoardItemObject.PULSE_MIN_OPACITY);
   }
 
   public setHighlighted(on: boolean): void {

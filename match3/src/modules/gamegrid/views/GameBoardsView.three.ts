@@ -12,6 +12,10 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   private static readonly BACKDROP_Y = 0.015;
   /** Drawn over the panel, under the gem shadows (`0.045`). */
   private static readonly OUTLINE_Y = 0.02;
+  /** Cookie bolts, above the gem quad (`0.06`) and its stripes (`0.065`) so they read over them. */
+  private static readonly BEAM_Y = 0.08;
+  /** Swap contact rings — over the gems, under the bolts. */
+  private static readonly PULSE_Y = 0.07;
   /** Squared distance under which a gem counts as sitting in its cell. */
   private static readonly AT_REST_EPSILON = 1e-6;
 
@@ -36,6 +40,8 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * never meant to be.
    */
   private readonly _swapping = new Set<number>();
+  /** Item ids currently pulsing white, and how far through the pulse each is. */
+  private readonly _blinking = new Map<number, number>();
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -141,6 +147,322 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     mesh.position.y = GameBoardsView.OUTLINE_Y;
     this.add(mesh);
     this._outline = mesh;
+  }
+
+  /**
+   * Fires a bolt from `from` at every cell in `targets`, and resolves the moment they
+   * land — the caller pops the gems on impact, so this is the strike, not an overlay
+   * on top of one.
+   *
+   * Drawn flat in the board plane: each bolt is a unit quad pivoted at the cookie and
+   * stretched toward its target, so growing it along X is the shot travelling. Additive
+   * blending with no depth write keeps crossing bolts bright where they overlap instead
+   * of fighting each other for the same pixel.
+   */
+  public animateCookieBeams(
+    gridId: number,
+    from: { row: number; col: number },
+    targets: { row: number; col: number }[],
+    strikeSec?: number
+  ): Promise<void> {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go || targets.length === 0) return Promise.resolve();
+    // A combination times its own bolts; anything else takes the shared flight time.
+    const flight = strikeSec ?? cfg.cookieBeam.strikeSec;
+    if (flight <= 0) return Promise.resolve();
+
+    const origin = go.getCell(from.col, from.row);
+    if (!origin) return Promise.resolve();
+    const world = new THREE.Vector3();
+    origin.getWorldPosition(world);
+    const start = this.worldToLocal(world.clone());
+
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    // Once, on the shared geometry: the quad's origin moves to one END, so scaling X
+    // grows it away from the cookie instead of out of its own middle.
+    geometry.translate(0.5, 0, 0);
+    const spent: THREE.Object3D[] = [];
+    const materials: THREE.MeshBasicMaterial[] = [];
+
+    return new Promise((resolve) => {
+      let pending = targets.length;
+      const landed = (): void => {
+        pending--;
+        if (pending > 0) return;
+        resolve();
+        // Cleanup rides on the fade, which plays out after the gems have gone.
+        gsap.to(materials, {
+          opacity: 0,
+          duration: cfg.cookieBeam.fadeSec,
+          // Kills the flicker tween on the same property, so nothing pulls the bolt
+          // back up while it is fading.
+          overwrite: true,
+          onComplete: () => {
+            for (const obj of spent) obj.removeFromParent();
+            for (const m of materials) m.dispose();
+            geometry.dispose();
+          }
+        });
+      };
+
+      for (const target of targets) {
+        const cell = go.getCell(target.col, target.row);
+        if (!cell) {
+          landed();
+          continue;
+        }
+        cell.getWorldPosition(world);
+        const end = this.worldToLocal(world.clone());
+        const dx = end.x - start.x;
+        const dz = end.z - start.z;
+        const length = Math.hypot(dx, dz);
+        if (length < 1e-4) {
+          landed();
+          continue;
+        }
+
+        const material = new THREE.MeshBasicMaterial({
+          color: cfg.cookieBeam.color,
+          transparent: true,
+          opacity: cfg.cookieBeam.opacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        });
+        materials.push(material);
+
+        const bolt = new THREE.Mesh(geometry, material);
+        bolt.rotation.x = -Math.PI / 2;
+        // ±40%, so a volley of bolts is ragged rather than a set of identical bars.
+        bolt.scale.set(0, cfg.cookieBeam.thickness * (0.6 + Math.random() * 0.8), 1);
+
+        const pivot = new THREE.Group();
+        pivot.position.copy(start);
+        pivot.position.y = GameBoardsView.BEAM_Y;
+        pivot.rotation.y = -Math.atan2(dz, dx);
+        pivot.add(bolt);
+        this.add(pivot);
+        spent.push(pivot);
+
+        gsap.to(bolt.scale, {
+          x: length,
+          duration: flight,
+          // Accelerating: slow off the cookie, fastest at the moment it connects.
+          ease: "power2.in",
+          onComplete: landed
+        });
+        if (cfg.cookieBeam.flickers > 0) {
+          gsap.to(material, {
+            opacity: cfg.cookieBeam.opacity * 0.45,
+            duration: flight / (cfg.cookieBeam.flickers * 2),
+            repeat: cfg.cookieBeam.flickers * 2 - 1,
+            yoyo: true
+          });
+        }
+      }
+    });
+  }
+
+  /**
+   * A ring on each swapped cell, growing outward and fading — the contact between the
+   * two gems.
+   *
+   * Fire and forget: it outlives the swap tween and nothing waits on it, so a fast
+   * player can start the next move while the last one is still fading.
+   */
+  public animateSwapPulse(gridId: number, cells: { row: number; col: number }[]): void {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go || !cfg.swapPulse.enabled || cfg.swapPulse.sec <= 0) return;
+
+    const preset = go.preset as RectGridPreset;
+    const cellStep = Math.min(preset.columnSize, preset.rowSize);
+    // Built at diameter 1 so the configured sizes are a straight scale in cells. A
+    // thickness of 1 leaves no hole, which is how `thickness` reaches a filled disc.
+    const inner = 0.5 * Math.max(0, 1 - Math.min(1, cfg.swapPulse.thickness));
+    const geometry = new THREE.RingGeometry(inner, 0.5, 48);
+    const material = new THREE.MeshBasicMaterial({
+      color: cfg.swapPulse.color,
+      transparent: true,
+      opacity: cfg.swapPulse.opacity,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    const world = new THREE.Vector3();
+    const rings: THREE.Mesh[] = [];
+    for (const at of cells) {
+      const cell = go.getCell(at.col, at.row);
+      if (!cell) continue;
+      cell.getWorldPosition(world);
+
+      const ring = new THREE.Mesh(geometry, material);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.copy(this.worldToLocal(world.clone()));
+      ring.position.y = GameBoardsView.PULSE_Y;
+      ring.scale.setScalar(cfg.swapPulse.fromCells * cellStep);
+      this.add(ring);
+      rings.push(ring);
+    }
+    if (rings.length === 0) {
+      geometry.dispose();
+      material.dispose();
+      return;
+    }
+
+    const to = cfg.swapPulse.toCells * cellStep;
+    gsap.to(
+      rings.map((r) => r.scale),
+      { x: to, y: to, z: to, duration: cfg.swapPulse.sec, ease: "power2.out" }
+    );
+    gsap.to(material, {
+      opacity: 0,
+      duration: cfg.swapPulse.sec,
+      ease: "power1.in",
+      onComplete: () => {
+        for (const ring of rings) ring.removeFromParent();
+        geometry.dispose();
+        material.dispose();
+      }
+    });
+  }
+
+  /**
+   * Grows a just-created special into place over the same span as the pop, so it forms
+   * while the gems that earned it are vanishing and is finished exactly when they are.
+   *
+   * Scale only: the fall integrator owns position and the blink owns opacity, so this
+   * cannot fight either of them, and a gem that starts falling mid-growth keeps growing
+   * on the way down.
+   */
+  public animateSpecialSpawn(gridId: number, at: { row: number; col: number }): void {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go || cfg.animPopSec <= 0) return;
+
+    const gem = this._getGem(go, at.col, at.row);
+    if (!gem) return;
+
+    const target = { x: gem.scale.x, y: gem.scale.y, z: gem.scale.z };
+    gem.scale.setScalar(0.02);
+    gsap.to(gem.scale, {
+      ...target,
+      duration: cfg.animPopSec,
+      // A touch of overshoot: the special settles into its cell rather than simply
+      // reaching full size, which is what makes it read as forming.
+      ease: "back.out(1.7)",
+      overwrite: true
+    });
+  }
+
+  /**
+   * The shockwave a firing stripe sends both ways along its line.
+   *
+   * Fire and forget: it is pure decoration and outlives the gem that threw it, so it is
+   * not awaited and nothing waits on it. Each half travels clear of the board and is
+   * dropped once it is well outside the frame — it leaves the screen rather than
+   * stopping at the last cell.
+   */
+  public animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean): void {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go || !cfg.stripeWave.enabled || cfg.stripeWaveCellsPerSec <= 0) return;
+
+    const origin = go.getCell(at.col, at.row);
+    if (!origin) return;
+    const world = new THREE.Vector3();
+    origin.getWorldPosition(world);
+    const start = this.worldToLocal(world.clone());
+
+    const preset = go.preset as RectGridPreset;
+    // A row stripe clears its ROW, so its wave runs along the column axis; a column
+    // stripe is the other way round.
+    const axis = alongRow ? preset.columnAxis : preset.rowAxis;
+    const heading = new THREE.Vector3(axis.x, axis.y, axis.z).normalize();
+    const cellStep = alongRow ? preset.columnSize : preset.rowSize;
+    const lanes = alongRow ? cfg.cols : cfg.rows;
+    // Half the board plus the overshoot: far enough to be off screen before it stops.
+    const distance = (lanes / 2 + cfg.stripeWave.overshootCells) * cellStep;
+
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    const material = new THREE.MeshBasicMaterial({
+      color: cfg.stripeWave.color,
+      transparent: true,
+      opacity: cfg.stripeWave.opacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    let alive = 2;
+    const drop = (obj: THREE.Object3D) => (): void => {
+      obj.removeFromParent();
+      alive--;
+      if (alive > 0) return;
+      geometry.dispose();
+      material.dispose();
+    };
+
+    for (const direction of [1, -1]) {
+      const bar = new THREE.Mesh(geometry, material);
+      bar.rotation.x = -Math.PI / 2;
+      bar.scale.set(cfg.stripeWave.lengthCells * cellStep, cfg.stripeWave.widthCells * cellStep, 1);
+
+      const pivot = new THREE.Group();
+      pivot.position.copy(start);
+      pivot.position.y = GameBoardsView.BEAM_Y;
+      pivot.rotation.y = -Math.atan2(heading.z * direction, heading.x * direction);
+      pivot.add(bar);
+      this.add(pivot);
+
+      // Constant speed: the pops it is travelling with are evenly spaced, so any easing
+      // would put the wave front ahead of some of them and behind others.
+      gsap.to(bar.position, {
+        x: distance,
+        duration: distance / (cfg.stripeWaveCellsPerSec * cellStep),
+        ease: "none",
+        onComplete: drop(pivot)
+      });
+    }
+  }
+
+  /**
+   * Marks gems that should pulse. Keyed by item id so the pulse follows the gem if the
+   * board shifts under it; anything no longer listed is restored to its normal look.
+   */
+  public setBlinking(gridId: number, cells: { row: number; col: number }[]): void {
+    const go = this.getGridObject(gridId);
+    if (!go) return;
+
+    const wanted = new Set<number>();
+    for (const { row, col } of cells) {
+      const gem = this._getGem(go, col, row);
+      if (gem) wanted.add(gem.itemId);
+    }
+
+    for (const itemId of [...this._blinking.keys()]) {
+      if (wanted.has(itemId)) continue;
+      this._blinking.delete(itemId);
+      this._gemsById(go).get(itemId)?.setTint(null);
+    }
+    for (const itemId of wanted) if (!this._blinking.has(itemId)) this._blinking.set(itemId, 0);
+  }
+
+  /** Advances the white pulse on waiting boosters. */
+  private _stepBlinks(dtSeconds: number, byId: Map<number, GameBoardItemObject>, cfg: Match3Config): void {
+    if (this._blinking.size === 0) return;
+    const step = Math.max(0.01, cfg.booster.blinkStepSec);
+
+    for (const [itemId, elapsed] of [...this._blinking]) {
+      const gem = byId.get(itemId);
+      if (!gem) {
+        this._blinking.delete(itemId);
+        continue;
+      }
+      const next = elapsed + dtSeconds;
+      this._blinking.set(itemId, next);
+      // A half-cosine gives a smooth fade in and out rather than a hard flash.
+      gem.setTint(0.5 - 0.5 * Math.cos((Math.PI * next) / step));
+    }
   }
 
   public setCellPointerDownHandler(handler: ((gridId: number, col: number, row: number, event: PointerEvent) => void) | null): void {
@@ -339,10 +661,16 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const watched: number[] = [];
     for (const col of cols) {
       let fresh = 0;
+      // Highest point anything in this column is currently occupying. A new gem must
+      // start above it, or it is born inside a gem that is still on its way down.
+      let airspace = 0;
       for (let row = 0; row < go.rowCount; row++) {
         const gem = this._getGem(go, col, row);
-        if (gem && !captured.has(gem.itemId)) fresh++;
+        if (!gem) continue;
+        if (!captured.has(gem.itemId)) fresh++;
+        airspace = Math.max(airspace, this._falls.get(gem.itemId)?.height ?? 0);
       }
+      const spawnLift = Math.max((fresh + cfg.spawnLiftCells) * cellStep, airspace + cellStep);
 
       for (let row = 0; row < go.rowCount; row++) {
         const gem = this._getGem(go, col, row);
@@ -358,7 +686,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           // Place the rebuilt object exactly where the old one was rendering.
           gem.position.copy(gem.parent!.worldToLocal(new THREE.Vector3(was.x, was.y, was.z)));
         } else {
-          gem.position.copy(up.clone().multiplyScalar(fresh * cellStep));
+          gem.position.copy(up.clone().multiplyScalar(spawnLift));
         }
 
         const height = gem.position.length();
@@ -393,7 +721,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   public stepFalls(dtSeconds: number): void {
     const cfg = this._config;
     const go = this.getGridObject(Match3Config.GRID_ID);
-    if (!cfg || !go || (this._falls.size === 0 && this._bounces.size === 0)) return;
+    if (!cfg || !go) return;
+
+    // Blinking is independent of movement — a booster waits, and pulses, whether or not
+    // anything happens to be falling at that instant. Stepping it after the guard below
+    // froze the pulse the moment the board went quiet.
+    if (this._blinking.size > 0) this._stepBlinks(dtSeconds, this._gemsById(go), cfg);
+
+    if (this._falls.size === 0 && this._bounces.size === 0) return;
 
     const preset = go.preset as RectGridPreset;
     const cellStep = Math.min(preset.columnSize, preset.rowSize);
