@@ -199,7 +199,7 @@ export class Match3Config {
    * the genre and they feel quite different, so it is a flag rather than an assertion.
    */
   public readonly stripe = {
-    enabled: true,
+    enabled: false,
     minRunLength: 4,
     alongMatch: true,
     /** Stripe marks drawn over the gem, in gem-quad fractions. */
@@ -288,10 +288,7 @@ export class Match3Config {
      * one against an edge (5) or in a corner (3) still fires.
      */
     minNeighbours: 0,
-    /**
-     * How many times ONE bomb goes off before it is used up. 1 is the plain behaviour;
-     * 2 means it takes its ring, survives, pulses white, and takes it again.
-     */
+    /** How many times ONE bomb goes off before it is used up. 1 is the plain behaviour. */
     blasts: 2,
     /** Between one blast and the next. It pulses for the whole of this. */
     blastGapSec: 1.5,
@@ -422,6 +419,20 @@ export class Match3Config {
     /** Ring width as a fraction of its radius. 1 fills it in — a disc rather than a ring. */
     thickness: 0.1
   };
+  /**
+   * The score that floats up off a clear. One per MATCH; one per CELL when a booster is
+   * what cleared it, so a sweep or a blast shows what it actually touched.
+   */
+  public readonly scoreText = {
+    enabled: true,
+    points: 60,
+    color: "#ffffff",
+    /** Height of the text as a fraction of a cell. */
+    sizeCells: 0.48,
+    /** How far it drifts up, in cells, over `sec`. */
+    riseCells: 0.5,
+    sec: 0.4
+  };
   /** Shake on a clear of at least `minCells`, as a timeline track. 0 disables it. */
   public readonly shake = {
     minCells: 0,
@@ -463,9 +474,9 @@ export class Match3Config {
   /** Gems trading places on a valid swap. */
   public readonly animSwapSec = 0.24;
   /** Bounce-and-return when a swap makes no match. Half out, half back. */
-  public readonly animInvalidSwapSec = 0.3;
+  public readonly animInvalidSwapSec = 0.25;
   /** Pop: the gem shrinks away. Overlaps the fall, so it costs no wait. */
-  public readonly animPopSec = 0.25;
+  public readonly animPopSec = 0.15;
   /**
    * Easing for the pop. An `*.out` curve shrinks fastest at the start, so the gem
    * reads as reacting the instant it is matched; `*.in` would hold it at full size
@@ -476,7 +487,7 @@ export class Match3Config {
    * Downward acceleration in cells/s². Every gem falls under the same one, so a long
    * drop picks up more speed than a short one. Higher is heavier and snappier.
    */
-  public readonly fallAccelCellsPerSec2 = 12;
+  public readonly fallAccelCellsPerSec2 = 10;
   /**
    * Extra cells above the column that refilled gems start from. Under constant
    * acceleration a longer drop arrives faster, so this is the knob for how briskly new

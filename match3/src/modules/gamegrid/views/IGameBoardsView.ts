@@ -1,8 +1,5 @@
 import type { IGridView } from "@gamebyte/gamelabsjs";
 
-/** A gem's world position, captured before the grid rebuilt its object. */
-export type GemPosition = { x: number; y: number; z: number };
-
 export interface IGameBoardsView extends IGridView {
   /** The `PointerEvent` is forwarded so the controller can tell a swipe from a tap. */
   setCellPointerDownHandler(handler: ((gridId: number, col: number, row: number, event: PointerEvent) => void) | null): void;
@@ -39,19 +36,25 @@ export interface IGameBoardsView extends IGridView {
    * playable window. Such a gem is not a target for anything.
    */
   isAboveBoard(gridId: number, row: number, col: number): boolean;
+  /** Floats the score up off these cells. Decoration only. */
+  showScoreText(gridId: number, cells: { row: number; col: number }[]): void;
+  /**
+   * Resolves once nothing on the board is falling. The board's clear → fall → settle
+   * order is built on this: no match is looked for while a gem is still in the air.
+   */
+  waitForBoardAtRestAsync(): Promise<void>;
   /** `wave` staggers the clear: 0 is the match itself, higher values are further along a sweep. */
   animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[]): Promise<void>;
   /**
-   * Where each gem in `cols` is right now, keyed by item id. Read it BEFORE the model
-   * moves anything — the grid rebuilds a gem's object on every cell change, and the
-   * item id is all that survives.
+   * Registers the drop for every gem in `cols` that is not already where it belongs.
+   *
+   * No snapshot is passed in any more. A gem whose cell changed keeps its rendered
+   * position across the object rebuild the grid does on every cell change, so by the time
+   * this runs it is already in the right place; only `spawned` gems have to be lifted.
    */
-  captureGemPositions(gridId: number, cols: ReadonlySet<number>): Map<number, GemPosition>;
-  /** Flies every gem in `cols` to its current cell, from wherever it actually is. */
   reconcileColumns(
     gridId: number,
     cols: ReadonlySet<number>,
-    captured: Map<number, GemPosition>,
     /** Items refill has just created: only these enter from above the column. */
     spawned: ReadonlySet<number>
   ): Promise<void>;

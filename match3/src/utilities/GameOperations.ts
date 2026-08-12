@@ -514,10 +514,27 @@ export class GameOperations implements IInjectionTarget {
     return [...out.values()].filter((c) => this.isPlayable(c.row) && !deferred.has(key(c)));
   }
 
-  /** Replaces a cell's gem with a special one of the same colour. */
+  /**
+   * Replaces a cell's gem with a special one of the same colour, KEEPING the gem's
+   * identity when there was one there.
+   *
+   * `gemType`/`special` are readonly, so the item object has to be rebuilt — but the
+   * item ID is carried over, and that is what matters. The id is the handle every
+   * moving part of the board holds a gem by: the view's fall and bounce state, the
+   * armed-bomb counters, the combination queue, and the position map the fall pass
+   * captures before gravity runs. Minting a fresh id instead cut all of them at once,
+   * and the visible symptom was a promoted gem snapping to its cell centre — the view
+   * could not match the rebuilt object to anything it had been tracking, so it treated
+   * it as born in place. A gem promoted in mid-air lost its velocity with it.
+   *
+   * A new id is minted only when the cell is genuinely empty (the merged giant, which
+   * is created after its block has been cleared).
+   */
   public createSpecial(row: number, col: number, gemType: number, special: GemSpecial): void {
     if (!this.isPlayable(row)) return;
-    this._grid.setCellItem(col, row, new GameBoardItem(this._nextItemId++, gemType, special));
+    const standing = this.itemIdAt(row, col);
+    const itemId = standing >= 0 ? standing : this._nextItemId++;
+    this._grid.setCellItem(col, row, new GameBoardItem(itemId, gemType, special));
   }
 
   public clearMatchedCells(matches: { row: number; col: number }[]): void {
@@ -705,18 +722,27 @@ export class GameOperations implements IInjectionTarget {
   }
 
   /**
-   * Drops a cookie next to a stripe in the middle of the board. Purely a test aid —
-   * waiting for both to occur naturally makes the pairing slow to try.
+   * Two bombs in ONE column, one high and one low. Purely a test aid.
+   *
+   * The arrangement is the case the fall is hardest to get right on: setting the lower one
+   * off empties the cells under the upper one, so the upper one is still coming down when
+   * its own turn arrives. Everything that reads wrong about a booster — popping at its
+   * cell instead of where it is, firing as though the gems above it had already landed —
+   * shows up here and nowhere as plainly.
+   *
+   * Bombs only for now; the cookies that used to sit beside them are out of the way while
+   * the bomb is what is being worked on.
    */
   private _seedBoosterPair(): void {
-    const row = this._config.firstVisibleRow + Math.floor(this._config.rows / 2);
-    const col = Math.max(0, Math.floor(this._config.cols / 2) - 1);
-    if (col + 1 >= this._config.cols) return;
+    const col = Math.floor(this._config.cols / 2);
+    // Kept off the very bottom so the lower bomb has a ring of gems under it to take, and
+    // off the very top so the upper one is inside the window rather than in the reserve.
+    const low = this._config.lastVisibleRow - 1;
+    const high = this._config.firstVisibleRow + 1;
+    if (high >= low) return;
 
-    // A cookie beside a bomb: swapping them turns every gem of that colour into a bomb
-    // and sets them off one after another.
-    this._seedSpecial(row, col, GemSpecial.ColorBomb);
-    this._seedSpecial(row, col + 1, GemSpecial.Booster);
+    this._seedSpecial(low, col, GemSpecial.Booster);
+    this._seedSpecial(high, col, GemSpecial.Booster);
   }
 
   /**

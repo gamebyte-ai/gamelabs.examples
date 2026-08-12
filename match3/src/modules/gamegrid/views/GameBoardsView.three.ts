@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import gsap from "gsap";
-import type { GridObject, IInstanceResolver, RectGridPreset } from "@gamebyte/gamelabsjs";
+import type { GridItemObjectOptions, GridObject, IInstanceResolver, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridsView, ParticleBudget, type GridCellObject } from "@gamebyte/gamelabsjs";
 import { Match3Config } from "../../../Match3Config.js";
-import type { GemPosition, IGameBoardsView } from "./IGameBoardsView.js";
+import type { IGameBoardsView } from "./IGameBoardsView.js";
 import { GameBoardItemObject } from "./GameBoardItemObject.js";
 import { GemPopEmitter } from "./GemPopEmitter.three.js";
 
@@ -32,6 +32,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    */
   private readonly _bounces = new Map<number, { elapsed: number }>();
   private _landingWatchers: { items: number[]; resolve: () => void }[] = [];
+  /**
+   * Callers waiting for the WHOLE board to stop moving, rather than for a named set of
+   * gems. {@link _landingWatchers} answers "did the gems I just retargeted land?", which
+   * is not the same question: a cascade retargets gems the earlier caller never named, so
+   * a per-item watcher can resolve while the board is still visibly falling. The strict
+   * clear/fall/settle order needs the board-wide answer.
+   */
+  private _restWatchers: (() => void)[] = [];
   private _popEmitter: GemPopEmitter | null = null;
   /**
    * Gems inside a swap tween. Their local offset is LATERAL, not height, so the fall
@@ -40,8 +48,25 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * never meant to be.
    */
   private readonly _swapping = new Set<number>();
+  /** One score texture per gem colour, drawn on demand and shared from then on. */
+  private readonly _scoreTextures = new Map<number, THREE.Texture>();
   /** Item ids currently pulsing white, and how far through the pulse each is. */
   private readonly _blinking = new Map<number, number>();
+  /**
+   * Where a gem was rendering, in WORLD space, at the moment its object was torn down.
+   *
+   * The grid model has no notion of a gem changing cell: `setCellItem` always emits
+   * removed-then-added, so the view destroys the object and builds a new one, and the new
+   * one is born at its cell's origin. Left alone that IS the snap — a gem handed a lower
+   * cell mid-fall reappears already at the bottom of it.
+   *
+   * So the position is carried across the rebuild by hand. {@link destroyItem} records it
+   * on the way out and {@link createItem} puts it back on the way in, which makes the
+   * rebuild invisible: the gem keeps the exact world position it had, and its speed is
+   * still in {@link _falls} under the same item id. Cell changes stop being events the
+   * fall has to survive.
+   */
+  private readonly _worldOnRebuild = new Map<number, THREE.Vector3>();
 
   public override inject(resolver: IInstanceResolver): void {
     super.inject(resolver);
@@ -61,6 +86,64 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   /** The board's pop emitter, for the app to register with the particle manager. */
   public get popEmitter(): GemPopEmitter | null {
     return this._popEmitter;
+  }
+
+  /**
+   * Remembers where the gem was rendering before its object goes away, so that if this
+   * teardown is a cell CHANGE rather than a clear, {@link createItem} can put the new
+   * object exactly where the old one was.
+   *
+   * A clear leaves an entry nobody claims; {@link _pruneRebuildMemory} drops those once
+   * the board is still, which is the only moment it is safe to tell the two apart.
+   */
+  public override destroyItem(itemId: number, gridId: number, col: number, row: number): void {
+    // Still in its cell at this point — `super` is what takes it out.
+    const gem = this._gemAt(gridId, col, row);
+    if (gem?.itemId === itemId) {
+      this._worldOnRebuild.set(itemId, gem.getWorldPosition(new THREE.Vector3()));
+    }
+    super.destroyItem(itemId, gridId, col, row);
+  }
+
+  /**
+   * Builds the gem, then restores the world position it had before the rebuild — turning
+   * a destroy/create pair back into the move it actually was.
+   *
+   * A genuinely new gem has nothing remembered and stays at its cell origin. Whether it
+   * then falls is not decided here: {@link reconcileColumns} lifts the ones that entered
+   * from above and registers the drop.
+   */
+  public override createItem(itemOptions: GridItemObjectOptions, gridId: number, col: number, row: number): void {
+    super.createItem(itemOptions, gridId, col, row);
+
+    const was = this._worldOnRebuild.get(itemOptions.itemId);
+    if (!was) return;
+    this._worldOnRebuild.delete(itemOptions.itemId);
+
+    const gem = this._gemAt(gridId, col, row);
+    if (!gem?.parent) return;
+    gem.position.copy(gem.parent.worldToLocal(was.clone()));
+  }
+
+  /** The gem object in a cell, or null. */
+  private _gemAt(gridId: number, col: number, row: number): GameBoardItemObject | null {
+    const go = this.getGridObject(gridId);
+    return go ? this._getGem(go, col, row) : null;
+  }
+
+  /**
+   * Forgets the gems that were cleared rather than moved. Only run on a still board: while
+   * anything is in flight an id missing from the grid may simply be mid-rebuild.
+   */
+  private _pruneRebuildMemory(): void {
+    if (this._worldOnRebuild.size === 0) return;
+    const go = this.getGridObject(Match3Config.GRID_ID);
+    if (!go) return;
+
+    const onBoard = this._gemsById(go);
+    for (const itemId of [...this._worldOnRebuild.keys()]) {
+      if (!onBoard.has(itemId)) this._worldOnRebuild.delete(itemId);
+    }
   }
 
   public override postInitialize(): void {
@@ -492,6 +575,87 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   }
 
   /**
+   * Floats the score up off each of these cells.
+   *
+   * One texture for the whole board — the number never changes — and a quad per cell that
+   * drifts up and fades. Fire and forget: nothing waits for it, and it outlives the gem it
+   * came from.
+   */
+  public showScoreText(gridId: number, cells: { row: number; col: number }[]): void {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go || !cfg.scoreText.enabled || cells.length === 0) return;
+
+    const preset = go.preset as RectGridPreset;
+    const cellStep = Math.min(preset.columnSize, preset.rowSize);
+    const height = cfg.scoreText.sizeCells * cellStep;
+    const width = height * 2;
+    const world = new THREE.Vector3();
+
+    for (const at of cells) {
+      const cell = go.getCell(at.col, at.row);
+      if (!cell) continue;
+      cell.getWorldPosition(world);
+
+      // The gem is still standing at this point — the clear has not run yet — so its
+      // colour is there to be read. A score in the colour of what popped says WHICH gem
+      // it came from, which a white one cannot.
+      const gemType = this._getGem(go, at.col, at.row)?.gemType ?? -1;
+      const material = new THREE.MeshBasicMaterial({ map: this._scoreTexture(cfg, gemType), transparent: true, depthWrite: false });
+      const label = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+      label.rotation.x = -Math.PI / 2;
+      label.position.copy(this.worldToLocal(world.clone()));
+      label.position.y = GameBoardsView.BEAM_Y + 0.01;
+      this.add(label);
+
+      const up = this._negRowAxisOffset(go, cfg.scoreText.riseCells * cellStep);
+      gsap.to(label.position, { x: label.position.x + up.x, z: label.position.z + up.z, duration: cfg.scoreText.sec, ease: "power1.out" });
+      gsap.to(material, {
+        opacity: 0,
+        duration: cfg.scoreText.sec,
+        ease: "power2.in",
+        onComplete: () => {
+          label.removeFromParent();
+          label.geometry.dispose();
+          material.dispose();
+        }
+      });
+    }
+  }
+
+  /** The number in one gem's colour, drawn once into a canvas and cached. */
+  private _scoreTexture(cfg: Match3Config, gemType: number): THREE.Texture {
+    const cached = this._scoreTextures.get(gemType);
+    if (cached) return cached;
+
+    const palette = Match3Config.GEM_PALETTE;
+    const fill =
+      gemType >= 0 ? `#${palette[gemType % palette.length].toString(16).padStart(6, "0")}` : cfg.scoreText.color;
+    const texture = this._buildScoreTexture(cfg, fill);
+    this._scoreTextures.set(gemType, texture);
+    return texture;
+  }
+
+  private _buildScoreTexture(cfg: Match3Config, fill: string): THREE.Texture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d")!;
+    ctx.font = "bold 88px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.strokeText(String(cfg.scoreText.points), 128, 64);
+    ctx.fillStyle = fill;
+    ctx.fillText(String(cfg.scoreText.points), 128, 64);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  /**
    * Marks gems that should pulse. Keyed by item id so the pulse follows the gem if the
    * board shifts under it; anything no longer listed is restored to its normal look.
    */
@@ -627,6 +791,10 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     // ghost entirely (rather than tweening it for 0s) keeps the board clean while the
     // fall is under test.
     if (total <= 0) return Promise.resolve();
+    const preset = go.preset as RectGridPreset;
+    const cellStep = Math.min(preset.columnSize, preset.rowSize);
+    const accel = cfg.fallAccelCellsPerSec2 * cellStep;
+    const up = this._negRowAxisOffset(go, 1).normalize();
     return new Promise((resolve) => {
       let n = matches.length;
       const doneOne = (): void => {
@@ -641,12 +809,18 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           continue;
         }
         const ghost = this._buildPopGhost(gem);
-        // The CELL's position, not the gem's. The model treats a gem as arrived the
-        // moment it is assigned a cell, but the gem may still be visually descending
-        // from the reserve — popping at its current position played the burst high
-        // above the board, outside the play area entirely.
-        const cell = go.getCell(col, row);
-        (cell ?? gem).getWorldPosition(world);
+        // The GEM's own position, wherever it actually is — mid-fall included. A gem
+        // caught in a blast while it is still coming down shrinks away in the air, which
+        // is what it looks like it should do.
+        //
+        // This used to read the CELL's position instead, to stop a gem descending from the
+        // reserve from popping forty rows above the board. That guard now lives with the
+        // rule rather than the visual: {@link isAboveBoard} keeps a gem that has not
+        // reached the playable window out of the clear altogether, so nothing off-screen
+        // can be popped and the visual is free to be honest about where the gem is. Using
+        // the cell for everything was what teleported a falling gem to the cell centre
+        // before shrinking it.
+        gem.getWorldPosition(world);
         this.add(ghost);
         ghost.position.copy(this.worldToLocal(world.clone()));
         ghost.scale.copy(gem.scale);
@@ -657,6 +831,18 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           ghost.removeFromParent();
           doneOne();
         };
+        // A gem taken out of the air carries on down while it shrinks. The real object is
+        // gone the moment the model clears the cell, so without this the ghost stops dead
+        // where the gem was and shrinks in place — the same jolt as popping at the cell
+        // centre, just higher up. Integrated over the whole visible life of the ghost, the
+        // sweep delay included, so it never sits still.
+        const fall = this._falls.get(gem.itemId);
+        const life = (wave ?? 0) * cfg.clear.stepSec + total;
+        if (fall && life > 0) {
+          const drop = fall.speed * life + 0.5 * accel * life * life;
+          const to = ghost.position.clone().addScaledVector(up, -drop);
+          gsap.to(ghost.position, { x: to.x, y: to.y, z: to.z, duration: life, ease: "none", overwrite: true });
+        }
         // Straight to shrinking — no scale-up overshoot first. Effects will layer on
         // top of this later, so the pop itself stays a plain uniform shrink.
         gsap.to(ghost.scale, {
@@ -677,36 +863,6 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   }
 
   /**
-   * Where each gem in `cols` is right now, in world space, keyed by item id.
-   *
-   * Must be read BEFORE the model moves anything. The grid destroys a gem's object
-   * and builds a new one whenever the item changes cell, so afterwards there is no
-   * record of where the gem was rendering — and the item id is the only thing that
-   * survives the rebuild.
-   */
-  public captureGemPositions(gridId: number, cols: ReadonlySet<number>): Map<number, GemPosition> {
-    const out = new Map<number, GemPosition>();
-    const go = this.getGridObject(gridId);
-    if (!go) return out;
-
-    const world = new THREE.Vector3();
-    for (const col of cols) {
-      for (let row = 0; row < go.rowCount; row++) {
-        const gem = this._getGem(go, col, row);
-        if (!gem) continue;
-        // A gem mid-bounce has already arrived; its dip is decoration. Recording the
-        // dipped position would make the next pass read it as height still to fall and
-        // relaunch it, which spreads bounces to cells that never moved.
-        const settled = this._bounces.has(gem.itemId) || this._swapping.has(gem.itemId);
-        const source = settled ? (go.getCell(col, row) ?? gem) : gem;
-        source.getWorldPosition(world);
-        out.set(gem.itemId, { x: world.x, y: world.y, z: world.z });
-      }
-    }
-    return out;
-  }
-
-  /**
    * Retargets every gem in `cols` onto the cell it now occupies, WITHOUT restarting
    * its motion. A gem already falling keeps its speed and simply gets a new, lower
    * target; only a gem at rest starts from scratch.
@@ -716,12 +872,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * and re-accelerated every time another match landed. The motion is integrated per
    * frame instead (see {@link stepFalls}), which makes retargeting free.
    */
-  public reconcileColumns(
-    gridId: number,
-    cols: ReadonlySet<number>,
-    captured: Map<number, GemPosition>,
-    spawned: ReadonlySet<number>
-  ): Promise<void> {
+  public reconcileColumns(gridId: number, cols: ReadonlySet<number>, spawned: ReadonlySet<number>): Promise<void> {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
     if (!cfg || !go) return Promise.resolve();
@@ -731,14 +882,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
 
     const watched: number[] = [];
     for (const col of cols) {
-      let fresh = 0;
       // Highest point anything in this column is currently occupying. A new gem must
       // start above it, or it is born inside a gem that is still on its way down.
       let airspace = 0;
+      let fresh = 0;
       for (let row = 0; row < go.rowCount; row++) {
         const gem = this._getGem(go, col, row);
         if (!gem) continue;
-        if (!captured.has(gem.itemId)) fresh++;
+        if (spawned.has(gem.itemId)) fresh++;
         airspace = Math.max(airspace, this._falls.get(gem.itemId)?.height ?? 0);
       }
       const spawnLift = Math.max((fresh + cfg.spawnLiftCells) * cellStep, airspace + cellStep);
@@ -747,25 +898,18 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         const gem = this._getGem(go, col, row);
         if (!gem) continue;
 
-        // Already landed and just playing its dip: leave it be. Resetting its position
-        // every pass would fight the bounce and show up as a stutter.
+        // A swap tween owns this gem's offset and it is LATERAL, not height — leave it be.
         if (this._swapping.has(gem.itemId)) continue;
+        // Landed and just playing its dip. Resetting its position every pass would fight
+        // the bounce and show up as a stutter.
         if (this._bounces.has(gem.itemId) && !this._falls.has(gem.itemId)) continue;
 
-        const was = captured.get(gem.itemId);
-        if (was) {
-          // Place the rebuilt object exactly where the old one was rendering.
-          gem.position.copy(gem.parent!.worldToLocal(new THREE.Vector3(was.x, was.y, was.z)));
-        } else if (spawned.has(gem.itemId)) {
-          // Refill made this one: it enters from above the column.
-          gem.position.copy(up.clone().multiplyScalar(spawnLift));
-        } else {
-          // Created in this cell — a booster a match left behind, a converted gem, the
-          // merged item. It starts where it was made. Whether it FALLS is not decided
-          // here at all: if the cells under it are empty, the next pass hands it a lower
-          // cell and it drops from wherever it stands.
-          gem.position.set(0, 0, 0);
-        }
+        // Only the gems that entered from above are placed here. Everything else is
+        // ALREADY in the right place: a gem whose cell changed had its world position
+        // carried across the rebuild by {@link createItem}, and one that never moved was
+        // never touched. This is what used to be done from a per-pass snapshot, and the
+        // gems that snapped were the ones the snapshot could not account for.
+        if (spawned.has(gem.itemId)) gem.position.copy(up.clone().multiplyScalar(spawnLift));
 
         const height = gem.position.length();
         if (height < GameBoardsView.AT_REST_EPSILON) {
@@ -806,7 +950,14 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     // froze the pulse the moment the board went quiet.
     if (this._blinking.size > 0) this._stepBlinks(dtSeconds, this._gemsById(go), cfg);
 
-    if (this._falls.size === 0 && this._bounces.size === 0) return;
+    if (this._falls.size === 0 && this._bounces.size === 0) {
+      // A board-wide waiter may still be holding. `_falls` can be emptied from outside
+      // this loop — a gem cleared while it was in the air, or a reconcile that found one
+      // already home — and with the early return below the waiter would never be looked
+      // at again, leaving the board waiting for a fall that had already finished.
+      this._resolveRest();
+      return;
+    }
 
     const preset = go.preset as RectGridPreset;
     const cellStep = Math.min(preset.columnSize, preset.rowSize);
@@ -839,6 +990,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     this._enforceStack(go, up);
     this._stepBounces(dtSeconds, byId, up, cellStep, cfg);
     this._resolveLandings();
+    this._resolveRest();
   }
 
   /**
@@ -939,6 +1091,36 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       w.resolve();
       return false;
     });
+  }
+
+  /**
+   * Resolves once NOTHING on the board is falling any more.
+   *
+   * Bounces are deliberately not waited on: a bouncing gem has already reached its cell
+   * and its dip is decoration, so holding the board for it would add a pause to every
+   * cascade step for no rule reason.
+   *
+   * Resolves synchronously when the board is already still. The caller has to be able to
+   * ask without knowing whether anything is in flight, and {@link stepFalls} returns
+   * early on a quiet board — a watcher registered then would never be looked at again.
+   */
+  public waitForBoardAtRestAsync(): Promise<void> {
+    if (this._falls.size === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      this._restWatchers.push(resolve);
+    });
+  }
+
+  /** Releases the board-wide waiters, once per frame that ends with nothing in flight. */
+  private _resolveRest(): void {
+    if (this._falls.size > 0) return;
+    // A still board is the one moment a remembered position can be told apart from a gem
+    // that was cleared, so the memory is swept here rather than on every rebuild.
+    this._pruneRebuildMemory();
+    if (this._restWatchers.length === 0) return;
+    const waiting = this._restWatchers;
+    this._restWatchers = [];
+    for (const resolve of waiting) resolve();
   }
 
   /**
