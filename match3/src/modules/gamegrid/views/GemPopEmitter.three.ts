@@ -23,15 +23,19 @@ type Spark = {
 export class GemPopEmitter extends WorldParticleEmitter<Spark> {
   private static readonly GEOMETRY = new THREE.PlaneGeometry(1, 1);
 
+  private static readonly WHITE = new THREE.Color(0xffffff);
+
   private readonly _color: THREE.Color = new THREE.Color(0xffffff);
   private readonly _origin = new THREE.Vector3();
   private readonly _speed: number;
   private readonly _sparkSize: number;
+  private readonly _brighten: number;
 
-  public constructor(budget: ParticleBudget, maxParticles: number, speed: number, sparkSize: number) {
+  public constructor(budget: ParticleBudget, maxParticles: number, speed: number, sparkSize: number, brighten = 0) {
     super(budget, { type: "match3.gem-pop", rate: 0, maxParticles, lifetime: { min: 0.22, max: 0.42 } });
     this._speed = speed;
     this._sparkSize = sparkSize;
+    this._brighten = brighten;
     this.behaviors.push(new SparkBehavior());
   }
 
@@ -42,7 +46,10 @@ export class GemPopEmitter extends WorldParticleEmitter<Spark> {
    */
   public burst(origin: THREE.Vector3, color: number, count: number): void {
     this._origin.copy(origin);
-    this._color.set(color);
+    // The gem's own colour, carried toward white. A palette colour is a mid tone, and a mid
+    // tone reads as a dark speck against a light board however it is blended — the hue is
+    // what says which gem it was, the lift is what makes it read as a spark.
+    this._color.set(color).lerp(GemPopEmitter.WHITE, this._brighten);
     this.spawn(count);
   }
 
@@ -54,10 +61,16 @@ export class GemPopEmitter extends WorldParticleEmitter<Spark> {
    * cells looked like they were still popping.
    */
   protected override createParticleData(): Spark {
-    // Unlit: sparks read as light and never pick up scene colour.
+    // Unlit, and ADDITIVE: a spark only ever brightens what is under it. On plain blending
+    // the palette colours came out as dark flecks over the board, because that is what a mid
+    // tone laid over a lighter one is.
     const mesh = new THREE.Mesh(
       GemPopEmitter.GEOMETRY,
-      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
     );
     mesh.rotation.x = -Math.PI / 2;
     return { mesh, velocityX: 0, velocityZ: 0, spin: 0, size: this._sparkSize };

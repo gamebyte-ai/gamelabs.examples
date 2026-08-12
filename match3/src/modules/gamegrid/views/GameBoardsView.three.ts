@@ -29,6 +29,8 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   private _cellPointerDownHandler: ((gridId: number, col: number, row: number, event: PointerEvent) => void) | null = null;
   private _config: Match3Config | null = null;
   private _outline: THREE.Mesh | null = null;
+  /** The neon rings behind the outline. See {@link _createBoardOutline}. */
+  private readonly _outlineGlow: THREE.Mesh[] = [];
   private _backdrop: THREE.Mesh | null = null;
   /** Gems in flight, keyed by item id — the id survives the grid rebuilding objects. */
   private readonly _falls = new Map<number, { height: number; speed: number }>();
@@ -96,7 +98,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const fx = this._config.popParticles;
     if (fx.count > 0) {
       const budget = resolver.getInstance(ParticleBudget);
-      this._popEmitter = new GemPopEmitter(budget, fx.budget, fx.speed, fx.size * this._config.gridColumnSize);
+      this._popEmitter = new GemPopEmitter(budget, fx.budget, fx.speed, fx.size * this._config.gridColumnSize, fx.brighten);
       this.add(this._popEmitter);
     }
   }
@@ -248,6 +250,50 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const hw = w * 0.5;
     const hd = d * 0.5;
 
+    // The neon, drawn first so the core line lands on top of it: rings that share the
+    // outline's OUTER edge and reach further in, each fainter than the last. Additive, so
+    // where they overlap they add up into a falloff off the line rather than a set of
+    // visible bands.
+    //
+    // Inward because `clipToBoard` is a renderer-level clip at the board's edge: it applies
+    // to every material, so a glow spreading outward would simply be cut off.
+    const glow = cfg.boardOutlineGlow;
+    for (let i = glow.layers; i >= 1; i--) {
+      const reach = (glow.spread * i) / glow.layers;
+      const mesh = new THREE.Mesh(
+        this._ringGeometry(hw, hd, t + reach),
+        new THREE.MeshBasicMaterial({
+          color: cfg.boardOutlineColor,
+          side: THREE.DoubleSide,
+          transparent: true,
+          // Fainter the further it reaches, so the light falls off away from the line.
+          opacity: (glow.opacity * (glow.layers - i + 1)) / glow.layers,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        })
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = GameBoardsView.OUTLINE_Y;
+      this.add(mesh);
+      this._outlineGlow.push(mesh);
+    }
+
+    // MeshBasic: a flat outline should not react to scene lighting.
+    const mesh = new THREE.Mesh(
+      this._ringGeometry(hw, hd, t),
+      new THREE.MeshBasicMaterial({ color: cfg.boardOutlineColor, side: THREE.DoubleSide })
+    );
+    mesh.rotation.x = -Math.PI / 2; // shape XY → world XZ (top-down board plane)
+    mesh.position.y = GameBoardsView.OUTLINE_Y;
+    this.add(mesh);
+    this._outline = mesh;
+  }
+
+  /**
+   * A rectangular ring: the board's outer edge, `thickness` deep, hollow inside. The outer
+   * edge is fixed, so a thicker ring reaches further IN.
+   */
+  private _ringGeometry(hw: number, hd: number, thickness: number): THREE.ShapeGeometry {
     const shape = new THREE.Shape();
     shape.moveTo(-hw, -hd);
     shape.lineTo(hw, -hd);
@@ -256,6 +302,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     shape.closePath();
 
     // Wound opposite to the outer contour so it cuts a hole instead of filling.
+    const t = Math.min(thickness, Math.min(hw, hd) * 0.98);
     const hole = new THREE.Path();
     hole.moveTo(-hw + t, -hd + t);
     hole.lineTo(-hw + t, hd - t);
@@ -264,15 +311,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     hole.closePath();
     shape.holes.push(hole);
 
-    // MeshBasic: a flat outline should not react to scene lighting.
-    const mesh = new THREE.Mesh(
-      new THREE.ShapeGeometry(shape),
-      new THREE.MeshBasicMaterial({ color: cfg.boardOutlineColor, side: THREE.DoubleSide })
-    );
-    mesh.rotation.x = -Math.PI / 2; // shape XY → world XZ (top-down board plane)
-    mesh.position.y = GameBoardsView.OUTLINE_Y;
-    this.add(mesh);
-    this._outline = mesh;
+    return new THREE.ShapeGeometry(shape);
   }
 
   /**

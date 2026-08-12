@@ -64,8 +64,13 @@ export class Match3Config {
    * an empty cell under it, and say so in the console. `match3.play()` resumes.
    */
   public readonly debugPauseOnFloatingSpecial = false;
-  /** Clip rendering to the board. Off while testing, to see the reserve stacked above. */
-  public readonly clipToBoard = false;
+  /**
+   * Clip rendering to the board — the mask that keeps the reserve stacked above out of
+   * sight. Renderer-level, so it applies to EVERY material: anything the board draws
+   * outside its own rectangle is cut, the outline's glow included, which is why that glow
+   * spreads inward.
+   */
+  public readonly clipToBoard = true;
 
   /** Every row the grid holds: the reserve stacked on top of the playable window. */
   public get totalRows(): number {
@@ -131,14 +136,35 @@ export class Match3Config {
     maxAspect: 2.2,
     background: "#000000"
   };
-  /** Everything outside the board. Not the letterbox bars — those are `viewport`. */
-  public readonly backgroundColor = 0xdae7f1;
-  /** The grid's own panel, filling the board under the gems. */
-  public readonly boardBackgroundColor = 0x6b8fb5;
+  /**
+   * Everything outside the board. Not the letterbox bars — those are `viewport`.
+   *
+   * Dark, because the outline is neon: a bright saturated line only reads as glowing if
+   * what surrounds it is darker than it is.
+   */
+  public readonly backgroundColor = 0x070a14;
+  /** The grid's own panel, filling the board under the gems. Kept dark, as above. */
+  public readonly boardBackgroundColor = 0x101a2e;
   /** 1 = solid, 0 = no panel drawn at all (the scene backdrop shows through). */
   public readonly boardBackgroundOpacity = 1;
   /** Outline framing the whole grid. Individual cells are not drawn. */
-  public readonly boardOutlineColor = 0xffffff;
+  public readonly boardOutlineColor = 0x2de2ff;
+  /**
+   * The neon: rings drawn inside the outline, each one thicker and fainter, blended
+   * additively so they stack into a falloff. That is the whole trick — a bright core line
+   * with light bleeding off it.
+   *
+   * INWARD, not outward, because `clipToBoard` cuts everything at the board's edge and an
+   * outward glow would simply be sliced off. `layers` 0 or `opacity` 0 leaves the plain
+   * line.
+   */
+  public readonly boardOutlineGlow = {
+    layers: 4,
+    /** How far the innermost ring reaches past the line, in world units. */
+    spread: 0.26,
+    /** Opacity of the first ring; each one after is fainter. */
+    opacity: 0.3
+  };
   /** Outline stroke width in world units. */
   public readonly boardOutlineThickness = 0.09;
   /** Gap between the outermost cells and the outline. */
@@ -487,7 +513,7 @@ export class Match3Config {
     scaleFrom: 0.3,
     color: "#fff4d6",
     /** Peak, reached at the end of the fade in. */
-    opacity: 0.25,
+    opacity: 0.35,
     inSec: 0.07,
     outSec: 0.1
   };
@@ -505,6 +531,12 @@ export class Match3Config {
     speed: 2.2,
     /** Spark size as a fraction of a cell. */
     size: 0.35,
+    /**
+     * How far the gem's colour is carried toward white, 0–1. The hue is what says which gem
+     * popped; this is what stops a mid-tone palette colour reading as a dark fleck. 0 uses
+     * the palette colour as it is, 1 makes every spark white.
+     */
+    brighten: 0,
     /** Board-wide ceiling handed to `ParticlesBinding`. */
     budget: 600
   };
