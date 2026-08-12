@@ -675,7 +675,7 @@ export class GameOperations implements IInjectionTarget {
     }
     this._gameModel.resetScore();
     this._applyDebugGemTypeLimit();
-    if (this._config.debugSeedBoosters) this._seedBoosterPair();
+    this._seedBoosters();
     // Both of the above repaint cells of an already-settled board, so the check comes
     // after them, not before.
     this._clearOpeningMatches();
@@ -748,46 +748,94 @@ export class GameOperations implements IInjectionTarget {
   }
 
   /**
-   * Two cookies and two bombs in the middle of the board. Purely a test aid, laid out so
-   * that every cookie rule is reachable without waiting for one to occur naturally:
+   * Seeds the board's opening boosters, as many of each kind as
+   * {@link Match3Config.seedBoosters} asks for. Purely a test aid.
    *
-   *     🍪 🍪 💣 ·       the two cookies adjacent, a bomb beside the second
-   *     ·  ·  ·  ·
-   *     💣 ·  💣 💣      one bomb on its own, and two side by side
+   * The config gives COUNTS; the positions live here, as an ordered list per kind. Order is
+   * what keeps a lower count useful: the two that make a combination come first, so
+   * `bombs: 2` still gives a pair to trade, and the extras go where they will not set each
+   * other off. At the full count it lays out as
    *
-   * - Trade the cookies with each other for the pair: the whole board, a column at a time.
-   * - Trade either with the ordinary gem beside it for a plain colour clear.
-   * - Trade the second cookie with the bomb next to it for the cookie+bomb combination.
-   * - Trade the two bombs on the bottom row with each other for the bomb pair: one square
-   *   blast around the swap instead of two overlapping rings.
-   * - Fire the lone bomb with one cookie and then reach it with the other while it is
-   *   pulsing: that is the armed-bomb rule, and it needs a bomb that has ALREADY gone off
-   *   once, which no single swap can set up. It sits a clear column away from the pair so
-   *   that neither test sets the other off.
+   *     ═  ║  ·  ·  ·  ║     the stripe pair, and one on its own
+   *     ·  ·  ·  ═  ·  ·     one directly above a bomb, for the merge
+   *     🍪 🍪 💣 ·  ·  ·     the cookie pair, and a bomb beside the second
+   *     ·  ·  ·  ·  ·  ·
+   *     💣 ·  💣 💣 ·  ·     the bomb pair, and one clear of everything
    *
-   * Both bombs take whatever colour leaves the opening board match-free, so which colour a
-   * cookie has to be given to reach them is read off the board rather than fixed here.
+   * which puts every rule one swipe away: the cross, the merge, a plain line sweep, the
+   * whole-board cookie pair, a plain colour clear, cookie+bomb, and the square bomb pair.
+   * The lone bomb is for the armed-bomb rule — fire it with one cookie, then reach it with
+   * the other while it pulses — and it sits clear of the pair so neither test disturbs the
+   * other.
+   *
+   * Every one takes whatever colour leaves the opening board match-free, so which colour a
+   * cookie has to be given to reach one is read off the board rather than fixed here.
    */
-  private _seedBoosterPair(): void {
+  private _seedBoosters(): void {
+    const want = this._config.seedBoosters;
     const cols = this._config.cols;
-    const row = this._config.firstVisibleRow + Math.floor(this._config.rows / 2);
+    const mid = this._config.firstVisibleRow + Math.floor(this._config.rows / 2);
     const col = Math.max(0, Math.floor(cols / 2) - 1);
-    if (col + 1 >= cols) return;
+    const below = mid + 2;
+    const top = mid - 2;
 
-    this._seedSpecial(row, col, GemSpecial.ColorBomb);
-    this._seedSpecial(row, col + 1, GemSpecial.ColorBomb);
-    // Adjacent to the second cookie, so the combination is one swipe away.
-    if (col + 2 < cols) this._seedSpecial(row, col + 2, GemSpecial.Booster);
-    // Clear of the cookies, so firing it is a deliberate act rather than a side effect of
-    // whichever swap is being tried.
-    const below = row + 2;
-    if (below > this._config.lastVisibleRow) return;
-    this._seedSpecial(below, col, GemSpecial.Booster);
-    // Two more side by side for the bomb pair, with a column between them and the lone one
-    // above so that setting off either test leaves the other standing.
-    if (col + 3 < cols) {
-      this._seedSpecial(below, col + 2, GemSpecial.Booster);
-      this._seedSpecial(below, col + 3, GemSpecial.Booster);
+    const places: { kind: GemSpecial; count: number; at: Cell[] }[] = [
+      {
+        kind: GemSpecial.ColorBomb,
+        count: want.cookies,
+        // Side by side, so two of them are already a pair.
+        at: [
+          { row: mid, col },
+          { row: mid, col: col + 1 },
+          { row: mid, col: col - 1 }
+        ]
+      },
+      {
+        kind: GemSpecial.Booster,
+        count: want.bombs,
+        at: [
+          // Adjacent, so two of them are a pair.
+          { row: below, col: col + 2 },
+          { row: below, col: col + 3 },
+          // Beside the second cookie, for cookie+bomb.
+          { row: mid, col: col + 2 },
+          // Clear of everything, for the armed-bomb rule.
+          { row: below, col }
+        ]
+      },
+      {
+        kind: GemSpecial.StripedColumn,
+        count: want.stripes,
+        at: [
+          // Adjacent, and of the two axes, so two of them make the cross.
+          { row: top, col: Math.max(0, col - 1) },
+          { row: top, col },
+          // Directly above the bomb beside the cookies, for the merge.
+          { row: mid - 1, col: col + 2 },
+          // On its own, for a plain line sweep.
+          { row: top, col: cols - 1 }
+        ]
+      }
+    ];
+
+    for (const { kind, count, at } of places) {
+      let placed = 0;
+      for (const cell of at) {
+        if (placed >= count) break;
+        if (cell.col < 0 || cell.col >= cols || !this.isPlayable(cell.row)) continue;
+        // Already taken by an earlier kind — a smaller board can fold two slots onto one
+        // cell, and overwriting would quietly cost the caller a booster it asked for.
+        if (this.specialAt(cell.row, cell.col) !== GemSpecial.None) continue;
+        // Stripes alternate axis, so both sweeps are reachable however many are asked for.
+        const axis =
+          kind === GemSpecial.StripedColumn
+            ? placed % 2 === 0
+              ? GemSpecial.StripedRow
+              : GemSpecial.StripedColumn
+            : kind;
+        this._seedSpecial(cell.row, cell.col, axis);
+        placed++;
+      }
     }
   }
 

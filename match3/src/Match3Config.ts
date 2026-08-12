@@ -57,8 +57,23 @@ export class Match3Config {
     gemType: 3,
     count: 7
   };
-  /** Test aid: start with a stripe beside a bomb, to try their combination. */
-  public readonly debugSeedBoosters = true;
+  /**
+   * Boosters the board OPENS with, per kind. A test aid: waiting for one to occur naturally
+   * makes its rules slow to try.
+   *
+   * Counts only — WHERE they go is chosen for you, and the order is picked so that the
+   * combinations stay reachable as the counts come down. Two cookies land side by side
+   * before a third goes anywhere else, two bombs likewise, and a stripe is put directly
+   * above a bomb before one is placed on its own. So `cookies: 1` gives a cookie with no
+   * pair to trade with, `cookies: 2` gives the pair, and so on.
+   *
+   * All zero opens a plain board.
+   */
+  public readonly seedBoosters = {
+    cookies: 2,
+    bombs: 4,
+    stripes: 4
+  };
   /**
    * Test aid: freeze the board (`timeScale = 0`) the instant a special is created with
    * an empty cell under it, and say so in the console. `match3.play()` resumes.
@@ -225,7 +240,7 @@ export class Match3Config {
    * the genre and they feel quite different, so it is a flag rather than an assertion.
    */
   public readonly stripe = {
-    enabled: false,
+    enabled: true,
     minRunLength: 4,
     alongMatch: true,
     /** Stripe marks drawn over the gem, in gem-quad fractions. */

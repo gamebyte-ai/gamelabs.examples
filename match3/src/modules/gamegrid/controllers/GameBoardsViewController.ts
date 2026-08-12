@@ -1168,6 +1168,11 @@ export class GameBoardsViewController extends GridsViewController {
       }
       // A flash of light on everything this step takes, over the pop itself.
       view.animatePopLight(gridId, step, behind);
+      // The stripes THIS step fires throw their shockwave now, not when the clear was
+      // planned. Read here rather than up front for two reasons: a stripe reached on a later
+      // step should not have thrown already, and the gem has to still be standing to be read
+      // at all — which it is, because the clear below is what takes it.
+      this._playStripeWaves(gridId, step);
       // Wave 0 within the call: these pop now, the stagger lives out here.
       void view.animateClearMatches(gridId, step.map((c) => ({ row: c.row, col: c.col })), behind);
       svc.clearMatchedCells(step);
@@ -1464,9 +1469,6 @@ export class GameBoardsViewController extends GridsViewController {
       }
       events.emitPlaySfx(Match3AssetIds.SfxPop, this._nextPopRate());
       this._shakeIfBig(cells.length);
-      // Read off the board before anything is cleared: the stripes are still standing
-      // here, and once the sweep starts their gems are gone.
-      this._playStripeWaves(gridId, wave);
       // The clear travels as a wave: each step is popped AND removed from the model
       // before the next begins, so nothing falls until the wave has passed over it.
       // Clearing the whole set at once and staggering only the visuals left the gems
