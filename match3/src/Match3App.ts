@@ -70,6 +70,7 @@ export class Match3App extends GamelabsApp {
     this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemGreen, new URL("../assets/gem_green.svg", import.meta.url).href);
     this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemYellow, new URL("../assets/gem_yellow.svg", import.meta.url).href);
     this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemPurple, new URL("../assets/gem_purple.svg", import.meta.url).href);
+    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.Light, new URL("../assets/light2.png", import.meta.url).href);
 
     // Audio
     this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxSelect, new URL("../assets/sfx_select.wav", import.meta.url).href);

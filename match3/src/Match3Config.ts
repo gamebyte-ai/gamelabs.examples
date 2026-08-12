@@ -321,7 +321,12 @@ export class Match3Config {
     /** Cookie + gem: that colour goes at once, so only the bolts are really timed. */
     cookieGem: { stepSec: 0.04, beamSec: 0.18 },
     /** Cookie + cookie: the whole board, column by column from the left. */
-    cookiePair: { stepSec: 0.08, beamSec: 0.3 },
+    /**
+     * Cookie + cookie: the whole board, left to right a column at a time and top to bottom
+     * within each column. `stepSec` is the beat between columns, `rowStepSec` the shorter
+     * one between the cells of a column.
+     */
+    cookiePair: { stepSec: 0.04, beamSec: 0.1, rowStepSec: 0.01 },
     /**
      * Bomb + bomb: instead of two overlapping rings they go off together over a square
      * of `radius` around the swap. 1 is the ordinary 3x3 blast; 2 is 5x5, 3 is 7x7.
@@ -429,9 +434,33 @@ export class Match3Config {
     color: "#ffffff",
     /** Height of the text as a fraction of a cell. */
     sizeCells: 0.48,
+    /**
+     * Labels built up front and kept for the life of the board, so a busy clear allocates
+     * nothing. The board is 64 cells, so this covers the worst case — every gem scoring at
+     * once — with room over. The pool still grows if it is ever drained.
+     */
+    poolSize: 100,
     /** How far it drifts up, in cells, over `sec`. */
     riseCells: 0.5,
-    sec: 0.4
+    sec: 0.3,
+    /**
+     * How long the fade takes. Independent of `sec` so the label can keep climbing while it
+     * goes, or hold its place and fade slowly after it has arrived. The label lives for
+     * whichever of the two is longer.
+     */
+    fadeSec: 0.3,
+    /**
+     * Easing for the climb. `none` is a steady drift for the whole life, which is what reads
+     * as rising. An `*.out` curve finishes the travel in the first third and the label then
+     * hangs still for the rest of its life — over half a cell that looks static, not risen.
+     */
+    ease: "none",
+    /**
+     * Easing for the fade. Wants to be gentler than the climb's: `power2.in` holds full
+     * opacity almost to the end and then drops, which reads as vanishing rather than
+     * fading. `power1.in` is already on its way out by halfway.
+     */
+    fadeEase: "power1.in"
   };
   /** Shake on a clear of at least `minCells`, as a timeline track. 0 disables it. */
   public readonly shake = {
@@ -439,13 +468,43 @@ export class Match3Config {
     amplitude: 0.12,
     duration: 0.22
   };
-  /** Pop burst, via the framework's pooled emitter. `count: 0` disables it. */
+  /**
+   * The flash of light every popping gem leaves on its cell. Drawn with the `light` texture
+   * in ADDITIVE blending, so it reads as light over the board rather than as a white disc.
+   *
+   * Fades IN, then OUT, growing the whole time — the grow is what gives it its push, and the
+   * two fades are what keep it from arriving or leaving on a hard edge.
+   *
+   * `opacity` is the peak it reaches at the end of the fade in, so it is the knob for how
+   * strong the whole effect reads. 0 makes it invisible without turning it off; `enabled`
+   * false skips the work entirely.
+   */
+  public readonly popLight = {
+    enabled: true,
+    /** Diameter at full size, in cells. */
+    sizeCells: 2.4,
+    /** Starts at this fraction of full size and grows to it. */
+    scaleFrom: 0.3,
+    color: "#fff4d6",
+    /** Peak, reached at the end of the fade in. */
+    opacity: 0.25,
+    inSec: 0.07,
+    outSec: 0.1
+  };
+  /**
+   * Pop burst, via the framework's pooled emitter. Sparks take the popped gem's own colour.
+   * `count: 0` disables it — the emitter is not even built.
+   *
+   * `count` is PER GEM, so it multiplies by everything a clear touches: the cookie pair
+   * takes all 64 cells, which is where `budget` earns its keep. Over the budget the module
+   * simply refuses the spawn, so a busy cascade thins out rather than dropping frames.
+   */
   public readonly popParticles = {
-    count: 0,
+    count: 4,
     /** Outward speed in world units per second. */
     speed: 2.2,
     /** Spark size as a fraction of a cell. */
-    size: 0.16,
+    size: 0.35,
     /** Board-wide ceiling handed to `ParticlesBinding`. */
     budget: 600
   };
@@ -487,7 +546,7 @@ export class Match3Config {
    * Downward acceleration in cells/s². Every gem falls under the same one, so a long
    * drop picks up more speed than a short one. Higher is heavier and snappier.
    */
-  public readonly fallAccelCellsPerSec2 = 10;
+  public readonly fallAccelCellsPerSec2 = 20;
   /**
    * Extra cells above the column that refilled gems start from. Under constant
    * acceleration a longer drop arrives faster, so this is the knob for how briskly new

@@ -17,8 +17,15 @@ export interface IGameBoardsView extends IGridView {
     from: { row: number; col: number },
     targets: { row: number; col: number }[],
     /** Flight time for this volley. Defaults to `cookieBeam.strikeSec`. */
-    strikeSec?: number
+    strikeSec?: number,
+    /** Holds the volley back, for a sweep spaced finer than the timer's resolution. */
+    delaySec?: number
   ): Promise<void>;
+  /**
+   * The flash a blast throws over these cells: grows while it fades in and then out.
+   * `delaySec` holds it back, so a blast reached later in a sweep lights up on its own step.
+   */
+  animatePopLight(gridId: number, cells: { row: number; col: number }[], delaySec?: number): void;
   /** A growing, fading ring on each swapped cell — the contact. Decoration only. */
   animateSwapPulse(gridId: number, cells: { row: number; col: number }[]): void;
   /**
@@ -36,15 +43,20 @@ export interface IGameBoardsView extends IGridView {
    * playable window. Such a gem is not a target for anything.
    */
   isAboveBoard(gridId: number, row: number, col: number): boolean;
-  /** Floats the score up off these cells. Decoration only. */
-  showScoreText(gridId: number, cells: { row: number; col: number }[]): void;
+  /**
+   * Floats the score up off these cells. Decoration only.
+   *
+   * `delaySec` holds the labels back by that much, so a sweep spaced finer than the timer's
+   * resolution — several steps landing in one frame — still shows them one at a time.
+   */
+  showScoreText(gridId: number, cells: { row: number; col: number }[], delaySec?: number): void;
   /**
    * Resolves once nothing on the board is falling. The board's clear → fall → settle
    * order is built on this: no match is looked for while a gem is still in the air.
    */
   waitForBoardAtRestAsync(): Promise<void>;
   /** `wave` staggers the clear: 0 is the match itself, higher values are further along a sweep. */
-  animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[]): Promise<void>;
+  animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[], delaySec?: number): Promise<void>;
   /**
    * Registers the drop for every gem in `cols` that is not already where it belongs.
    *

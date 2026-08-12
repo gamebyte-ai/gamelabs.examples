@@ -3,9 +3,16 @@ import gsap from "gsap";
 import type { GridItemObjectOptions, GridObject, IInstanceResolver, RectGridPreset } from "@gamebyte/gamelabsjs";
 import { GridsView, ParticleBudget, type GridCellObject } from "@gamebyte/gamelabsjs";
 import { Match3Config } from "../../../Match3Config.js";
+import { Match3AssetIds } from "../../../Match3AssetIds.js";
 import type { IGameBoardsView } from "./IGameBoardsView.js";
 import { GameBoardItemObject } from "./GameBoardItemObject.js";
 import { GemPopEmitter } from "./GemPopEmitter.three.js";
+
+/** A pooled score label: the shared quad, and a material whose map is swapped per colour. */
+type ScoreLabel = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+
+/** A pooled blast flash — same shape, additive rather than plain. */
+type LightFlash = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
 
 export class GameBoardsView extends GridsView implements IGameBoardsView {
   /** The board's own panel. Below the outline so an opaque panel cannot cover it. */
@@ -50,6 +57,17 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   private readonly _swapping = new Set<number>();
   /** One score texture per gem colour, drawn on demand and shared from then on. */
   private readonly _scoreTextures = new Map<number, THREE.Texture>();
+  /** Idle score labels, waiting to be shown again. See {@link _takeScoreLabel}. */
+  private readonly _scorePool: ScoreLabel[] = [];
+  /** The one quad every score label draws on — they are all the same size. */
+  private _scoreQuad: THREE.PlaneGeometry | null = null;
+  /** The one quad every cookie bolt draws on, scaled to length per bolt. */
+  private _boltQuad: THREE.PlaneGeometry | null = null;
+  /** Idle blast flashes, and the unit quad they all draw on. */
+  private readonly _lightPool: LightFlash[] = [];
+  private _lightQuad: THREE.PlaneGeometry | null = null;
+  /** The glow texture. `undefined` until looked up, `null` if the asset never landed. */
+  private _lightTex: THREE.Texture | null | undefined = undefined;
   /** Item ids currently pulsing white, and how far through the pulse each is. */
   private readonly _blinking = new Map<number, number>();
   /**
@@ -150,6 +168,31 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     super.postInitialize();
     this._createBoardBackdrop();
     this._createBoardOutline();
+    this._fillScorePool();
+  }
+
+  /**
+   * Builds the score labels up front, so the first busy clear does not pay for them.
+   *
+   * Sized from the config rather than from the grid's preset — the preset is built from the
+   * same two values, and reading them here keeps this independent of whether the grid object
+   * exists yet.
+   */
+  private _fillScorePool(): void {
+    const cfg = this._config;
+    if (!cfg || cfg.scoreText.poolSize <= 0) return;
+
+    const cellStep = Math.min(cfg.gridColumnSize, cfg.gridRowSize);
+    const height = cfg.scoreText.sizeCells * cellStep;
+    const width = height * 2;
+    // Built into a list first, then handed over together: `_takeScoreLabel` serves the pool,
+    // so pushing as we go would just keep re-serving the same label.
+    const made: ScoreLabel[] = [];
+    for (let i = 0; i < cfg.scoreText.poolSize; i++) made.push(this._takeScoreLabel(width, height));
+    for (const label of made) {
+      label.visible = false;
+      this._scorePool.push(label);
+    }
   }
 
   /**
@@ -246,7 +289,8 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     gridId: number,
     from: { row: number; col: number },
     targets: { row: number; col: number }[],
-    strikeSec?: number
+    strikeSec?: number,
+    delaySec = 0
   ): Promise<void> {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
@@ -261,10 +305,17 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     origin.getWorldPosition(world);
     const start = this.worldToLocal(world.clone());
 
-    const geometry = new THREE.PlaneGeometry(1, 1);
-    // Once, on the shared geometry: the quad's origin moves to one END, so scaling X
-    // grows it away from the cookie instead of out of its own middle.
-    geometry.translate(0.5, 0, 0);
+    // One quad for every bolt ever thrown, not one per volley. A volley is now a single
+    // cell — the sweep is spaced per cell so the bolts are too — so building it per call
+    // meant a geometry per struck gem, sixty-four of them for a cookie pair.
+    //
+    // The origin sits at one END, so scaling X grows the bolt away from the cookie rather
+    // than out of its own middle. Done once, here.
+    if (!this._boltQuad) {
+      this._boltQuad = new THREE.PlaneGeometry(1, 1);
+      this._boltQuad.translate(0.5, 0, 0);
+    }
+    const geometry = this._boltQuad;
     const spent: THREE.Object3D[] = [];
     const materials: THREE.MeshBasicMaterial[] = [];
 
@@ -284,7 +335,6 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           onComplete: () => {
             for (const obj of spent) obj.removeFromParent();
             for (const m of materials) m.dispose();
-            geometry.dispose();
           }
         });
       };
@@ -327,17 +377,23 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         this.add(pivot);
         spent.push(pivot);
 
+        // Hidden until its turn, for the same reason the score labels are: a sweep spaced
+        // finer than the timer's floor hands out several volleys in one frame.
+        pivot.visible = delaySec <= 0;
         gsap.to(bolt.scale, {
           x: length,
           duration: flight,
+          delay: delaySec,
           // Accelerating: slow off the cookie, fastest at the moment it connects.
           ease: "power2.in",
+          onStart: () => (pivot.visible = true),
           onComplete: landed
         });
         if (cfg.cookie.beam.flickers > 0) {
           gsap.to(material, {
             opacity: cfg.cookie.beam.opacity * 0.45,
             duration: flight / (cfg.cookie.beam.flickers * 2),
+            delay: delaySec,
             repeat: cfg.cookie.beam.flickers * 2 - 1,
             yoyo: true
           });
@@ -581,7 +637,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * drifts up and fades. Fire and forget: nothing waits for it, and it outlives the gem it
    * came from.
    */
-  public showScoreText(gridId: number, cells: { row: number; col: number }[]): void {
+  public showScoreText(gridId: number, cells: { row: number; col: number }[], delaySec = 0): void {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
     if (!cfg || !go || !cfg.scoreText.enabled || cells.length === 0) return;
@@ -601,26 +657,205 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       // colour is there to be read. A score in the colour of what popped says WHICH gem
       // it came from, which a white one cannot.
       const gemType = this._getGem(go, at.col, at.row)?.gemType ?? -1;
-      const material = new THREE.MeshBasicMaterial({ map: this._scoreTexture(cfg, gemType), transparent: true, depthWrite: false });
-      const label = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
-      label.rotation.x = -Math.PI / 2;
+      const label = this._takeScoreLabel(width, height);
+      const material = label.material;
+      // Only the colour differs between labels, and the texture for it is already cached —
+      // so a recycled label needs nothing but a different map and its opacity back.
+      material.map = this._scoreTexture(cfg, gemType);
+      material.opacity = 1;
       label.position.copy(this.worldToLocal(world.clone()));
       label.position.y = GameBoardsView.BEAM_Y + 0.01;
       this.add(label);
 
+      // Hidden until its turn. `delaySec` is how much longer this label has to wait, and the
+      // caller may hand out several in the same frame — a sweep step shorter than a frame
+      // runs more than one step before the browser paints. Held on the tween rather than on
+      // the caller's clock, so the labels still come out one at a time however finely the
+      // sweep is spaced.
+      label.visible = delaySec <= 0;
       const up = this._negRowAxisOffset(go, cfg.scoreText.riseCells * cellStep);
-      gsap.to(label.position, { x: label.position.x + up.x, z: label.position.z + up.z, duration: cfg.scoreText.sec, ease: "power1.out" });
+      gsap.to(label.position, {
+        x: label.position.x + up.x,
+        z: label.position.z + up.z,
+        duration: cfg.scoreText.sec,
+        delay: delaySec,
+        ease: cfg.scoreText.ease,
+        onStart: () => (label.visible = true)
+      });
+      // The label lives as long as the fade, which is the one that ends it — it may outlast
+      // the climb, and disposing on the climb would cut the fade off mid-way.
       gsap.to(material, {
         opacity: 0,
-        duration: cfg.scoreText.sec,
-        ease: "power2.in",
-        onComplete: () => {
-          label.removeFromParent();
-          label.geometry.dispose();
-          material.dispose();
-        }
+        duration: cfg.scoreText.fadeSec,
+        delay: delaySec,
+        ease: cfg.scoreText.fadeEase,
+        onComplete: () => this._putScoreLabel(label)
       });
     }
+  }
+
+  /**
+   * A score label, recycled if one is idle. Nothing about a label is per-instance except
+   * its material's map and opacity, so they are handed out and taken back rather than built
+   * and thrown away — a cookie pair alone would otherwise churn a mesh, a geometry and a
+   * material for all sixty-four cells inside a second.
+   *
+   * The quad is SHARED: every label is the same size, which is a function of the cell size
+   * and `sizeCells` and so fixed for the life of the board.
+   */
+  private _takeScoreLabel(width: number, height: number): ScoreLabel {
+    this._scoreQuad ??= new THREE.PlaneGeometry(width, height);
+
+    const idle = this._scorePool.pop();
+    if (idle) {
+      // A label can be taken back while a tween still holds it — an interrupted clear, a
+      // board torn down mid-fade — so anything still driving it is cut before it is reused.
+      gsap.killTweensOf(idle.position);
+      gsap.killTweensOf(idle.material);
+      return idle;
+    }
+
+    const label = new THREE.Mesh(this._scoreQuad, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }));
+    label.rotation.x = -Math.PI / 2;
+    return label;
+  }
+
+  /** Takes a label out of the scene and back into the pool. Nothing is disposed. */
+  private _putScoreLabel(label: ScoreLabel): void {
+    label.visible = false;
+    label.removeFromParent();
+    this._scorePool.push(label);
+  }
+
+  /**
+   * The flash of light a popping gem leaves on its cell: grows the whole time, fading in
+   * and then out. Every clear gets it, a plain three-match as much as a blast.
+   *
+   * Additive, so it lights what is under it rather than covering it — the gem shrinking
+   * beneath the flash reads through it, which is what makes it look like light and not a
+   * white disc laid on the board.
+   */
+  public animatePopLight(gridId: number, cells: { row: number; col: number }[], delaySec = 0): void {
+    const cfg = this._config;
+    const go = this.getGridObject(gridId);
+    if (!cfg || !go || !cfg.popLight.enabled || cells.length === 0) return;
+
+    const texture = this._lightTexture();
+    if (!texture) return;
+
+    const light = cfg.popLight;
+    const life = light.inSec + light.outSec;
+    if (life <= 0) return;
+
+    const preset = go.preset as RectGridPreset;
+    const full = light.sizeCells * Math.min(preset.columnSize, preset.rowSize);
+    const world = new THREE.Vector3();
+
+    for (const at of cells) {
+      const cell = go.getCell(at.col, at.row);
+      if (!cell) continue;
+      cell.getWorldPosition(world);
+
+      const flash = this._takeLightFlash(texture);
+      flash.material.color.set(light.color);
+      flash.material.opacity = 0;
+      flash.position.copy(this.worldToLocal(world.clone()));
+      // Over the bolts, so a blast lights whatever else the clear is drawing.
+      flash.position.y = GameBoardsView.BEAM_Y + 0.02;
+      flash.scale.setScalar(full * light.scaleFrom);
+      // Held back like every other clear visual, so a blast reached on a later step of a
+      // sweep lights up when the sweep gets there.
+      flash.visible = delaySec <= 0;
+      this.add(flash);
+
+      gsap.to(flash.scale, {
+        x: full,
+        y: full,
+        z: full,
+        duration: life,
+        delay: delaySec,
+        ease: "power2.out",
+        onStart: () => (flash.visible = true)
+      });
+      // In then out as one sequence, so the peak lands between them rather than at the start.
+      gsap
+        .timeline({ delay: delaySec })
+        .to(flash.material, { opacity: light.opacity, duration: light.inSec, ease: "none" })
+        .to(flash.material, {
+          opacity: 0,
+          duration: light.outSec,
+          ease: "power2.in",
+          onComplete: () => this._putLightFlash(flash)
+        });
+    }
+  }
+
+  /** The glow texture, resolved once. Null until the asset has landed. */
+  private _lightTexture(): THREE.Texture | null {
+    if (this._lightTex === undefined) {
+      this._lightTex = this.assetLoader.getAsset<THREE.Texture>(Match3AssetIds.Light) ?? null;
+    }
+    return this._lightTex;
+  }
+
+  private _takeLightFlash(texture: THREE.Texture): LightFlash {
+    // A unit quad, scaled per flash — so `sizeCells` can change without a new geometry.
+    this._lightQuad ??= new THREE.PlaneGeometry(1, 1);
+
+    const idle = this._lightPool.pop();
+    if (idle) {
+      gsap.killTweensOf(idle.scale);
+      gsap.killTweensOf(idle.material);
+      return idle;
+    }
+
+    const flash = new THREE.Mesh(
+      this._lightQuad,
+      new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    flash.rotation.x = -Math.PI / 2;
+    return flash;
+  }
+
+  private _putLightFlash(flash: LightFlash): void {
+    flash.visible = false;
+    flash.removeFromParent();
+    this._lightPool.push(flash);
+  }
+
+  /**
+   * The pooled labels outlive the clears that use them, so the board is what has to let
+   * them go — nothing else ever will.
+   */
+  public override destroy(): void {
+    for (const label of this._scorePool) {
+      gsap.killTweensOf(label.position);
+      gsap.killTweensOf(label.material);
+      label.removeFromParent();
+      label.material.dispose();
+    }
+    this._scorePool.length = 0;
+    this._scoreQuad?.dispose();
+    this._scoreQuad = null;
+    this._boltQuad?.dispose();
+    this._boltQuad = null;
+    for (const flash of this._lightPool) {
+      gsap.killTweensOf(flash.scale);
+      gsap.killTweensOf(flash.material);
+      flash.removeFromParent();
+      flash.material.dispose();
+    }
+    this._lightPool.length = 0;
+    this._lightQuad?.dispose();
+    this._lightQuad = null;
+    for (const texture of this._scoreTextures.values()) texture.dispose();
+    this._scoreTextures.clear();
+    super.destroy();
   }
 
   /** The number in one gem's colour, drawn once into a canvas and cached. */
@@ -782,7 +1017,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * The clone shares geometry and materials with the original, so it is only detached
    * when the tween ends; disposing it would take the original's resources with it.
    */
-  public animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[]): Promise<void> {
+  public animateClearMatches(gridId: number, matches: { row: number; col: number; wave?: number }[], delaySec = 0): Promise<void> {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
     if (!cfg || !go || matches.length === 0) return Promise.resolve();
@@ -825,7 +1060,15 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         ghost.position.copy(this.worldToLocal(world.clone()));
         ghost.scale.copy(gem.scale);
 
-        this._popEmitter?.burst(ghost.position, Match3Config.GEM_PALETTE[gem.gemType % Match3Config.GEM_PALETTE.length], cfg.popParticles.count);
+        // Held until the pop actually starts, like the ghost itself. Fired here it went off
+        // the moment the step was PLANNED, so on a staggered sweep the sparks ran ahead of
+        // the gems they came from.
+        //
+        // The colour is the gem's own, so a burst says which gem it was.
+        const sparkColor = Match3Config.GEM_PALETTE[gem.gemType % Match3Config.GEM_PALETTE.length];
+        const burst = (): void => {
+          this._popEmitter?.burst(ghost.position, sparkColor, cfg.popParticles.count);
+        };
 
         const end = (): void => {
           ghost.removeFromParent();
@@ -841,7 +1084,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
         if (fall && life > 0) {
           const drop = fall.speed * life + 0.5 * accel * life * life;
           const to = ghost.position.clone().addScaledVector(up, -drop);
-          gsap.to(ghost.position, { x: to.x, y: to.y, z: to.z, duration: life, ease: "none", overwrite: true });
+          gsap.to(ghost.position, { x: to.x, y: to.y, z: to.z, duration: life, delay: delaySec, ease: "none", overwrite: true });
         }
         // Straight to shrinking — no scale-up overshoot first. Effects will layer on
         // top of this later, so the pop itself stays a plain uniform shrink.
@@ -850,11 +1093,13 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
           y: 0.02,
           z: 0.02,
           // Cells further along a sweep start later, so the line clears outward from
-          // the gem that fired it rather than vanishing in one go.
-          delay: (wave ?? 0) * cfg.clear.stepSec,
+          // the gem that fired it rather than vanishing in one go. `delaySec` is the step's
+          // own hold-off, for a sweep finer than the timer can space.
+          delay: delaySec + (wave ?? 0) * cfg.clear.stepSec,
           duration: total,
           ease: cfg.animPopEase,
           overwrite: true,
+          onStart: burst,
           onComplete: end,
           onInterrupt: end
         });

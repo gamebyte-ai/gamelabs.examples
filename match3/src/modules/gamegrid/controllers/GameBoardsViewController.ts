@@ -22,14 +22,30 @@ type SpecialSpawn = { row: number; col: number; gemType: number; special: GemSpe
  */
 type CookieBolt = { from: Cell; targets: Cell[]; wave?: number };
 
+/** A bomb that survived its blast, and the sweep step it was struck on. */
+type ArmedBomb = { itemId: number; wave: number };
+
 /**
  * How one clear is timed: the gap between its steps, and how long its bolts fly.
  * Combinations pass their own (see `Match3Config.combos`); everything else takes the
  * shared values.
  */
-type ClearPace = { stepSec: number; beamSec: number };
+type ClearPace = {
+  stepSec: number;
+  beamSec: number;
+  /**
+   * Gap between two steps of the SAME column, where `stepSec` is the gap between columns.
+   * Only the cookie pair sweeps in two directions at once; everything else leaves this
+   * unset and every step is `stepSec` apart.
+   */
+  rowStepSec?: number;
+};
 
 export class GameBoardsViewController extends GridsViewController {
+  /** Shortest gap between two fall passes — one frame at 60Hz. See {@link _requestFall}. */
+  private static readonly FALL_MIN_MS = 16;
+  private _lastFallAt = 0;
+  private _fallScheduled = false;
   private _gameModel: IGameModelType | null = null;
   private _operations: GameOperations | null = null;
   private _config: Match3Config | null = null;
@@ -381,6 +397,7 @@ export class GameBoardsViewController extends GridsViewController {
     const bolts: CookieBolt[] = [];
     const colours: number[] = [];
     const specials: SpecialSpawn[] = [];
+    const armed: ArmedBomb[] = [];
     const taken = new Set<string>();
 
     for (const group of this._runGroups(svc.findMatchRuns())) {
@@ -423,6 +440,7 @@ export class GameBoardsViewController extends GridsViewController {
       if (special) specials.push(special);
       bolts.push(...expanded.bolts);
       colours.push(...expanded.colours);
+      armed.push(...expanded.armed);
       // Two expansions can reach the same cell — one stripe's sweep crossing another
       // match. It is cleared once, keeping the earlier (lower) wave so the step it goes
       // on is the first one that claimed it.
@@ -442,7 +460,7 @@ export class GameBoardsViewController extends GridsViewController {
     // Any booster held back by this clear starts pulsing now, not when the step ends
     // — by then it is already going off and the blink would never be seen.
     this._updateBlink(gridId);
-    void this._runChainAsync(gridId, cells, specials, bolts, undefined, colours, true);
+    void this._runChainAsync(gridId, cells, specials, bolts, undefined, colours, true, armed);
   }
 
   /**
@@ -460,7 +478,7 @@ export class GameBoardsViewController extends GridsViewController {
     // none of its own. It takes one from the board instead of fizzling.
     const color = gemType >= 0 ? gemType : svc.randomVisibleGemType();
     const named = new Map<string, number>([[this._cellKey(at.row, at.col), color]]);
-    const { cells, bolts, colours } = this._expand([at], named);
+    const { cells, bolts, colours, armed } = this._expand([at], named);
     if (cells.some((c) => this._claimedCells.has(this._cellKey(c.row, c.col)))) {
       this._dropColours(colours);
       return;
@@ -468,7 +486,7 @@ export class GameBoardsViewController extends GridsViewController {
     // Claimed before the strike, so nothing falls into these cells or matches on them
     // while the bolts are still travelling.
     for (const c of cells) this._claimedCells.add(this._cellKey(c.row, c.col));
-    void this._runChainAsync(gridId, cells, [], bolts, this._config?.combos.cookieGem, colours);
+    void this._runChainAsync(gridId, cells, [], bolts, this._config?.combos.cookieGem, colours, false, armed);
   }
 
   /**
@@ -565,27 +583,45 @@ export class GameBoardsViewController extends GridsViewController {
    * Two cookies traded with each other: every gem on the board, taken a column at a
    * time from the left.
    *
-   * Not run through the expansion like the other combinations. Everything is going
-   * anyway, so there is nothing for a caught special to add — and a cookie in there
-   * would renumber the cells it took to its own step, which is exactly what would break
-   * the left-to-right order.
+   * Not run through the expansion like the other combinations: a cookie in there would
+   * renumber the cells it took to its own step, and that is what would break the
+   * left-to-right order.
+   *
+   * Bombs are handled here instead, because skipping the expansion also skipped the only
+   * place a booster is ever FIRED. "Cleared" and "fired" are separate things — the pair
+   * simply deleted every cell it covered, so a bomb it swept up was never set off, never
+   * counted a blast, and so never came back for its second one. It looked detonated and
+   * was not. Its ring still adds nothing (the whole board is going anyway); what was
+   * missing is the firing itself, which is what arms it and holds it out of this clear.
    */
   private _detonateCookiePair(gridId: number, from: Cell): void {
     const svc = this._operations;
     if (!svc) return;
 
-    const cells = svc.boardCellsLeftToRight().filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
+    const board = svc.boardCellsLeftToRight().filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
+    if (board.length === 0) return;
+
+    // Every bomb the pair covers is being set off, so each fires and each keeps whatever
+    // blasts it has left, exactly as it would inside the expansion.
+    // `wave` is the column, as it is for the bolts and the sweep below — so a bomb starts
+    // pulsing when the pair reaches ITS column, not when the swap happens.
+    const fired = board.filter((c) => svc.specialAt(c.row, c.col) === GemSpecial.Booster);
+    const { kept, armed } = this._armSurvivingBoosters(fired);
+    const cells = kept.size === 0 ? board : board.filter((c) => !kept.has(this._cellKey(c.row, c.col)));
     if (cells.length === 0) return;
+
     for (const c of cells) this._claimedCells.add(this._cellKey(c.row, c.col));
     // One volley per column, each tagged with the step it belongs to: the bolts reach a
     // column, that column goes, and the pair works its way across the board. The
     // expansion is skipped on this path, so this is the one place that has to say so.
-    const bolts: CookieBolt[] = [];
-    for (const col of new Set(cells.map((c) => c.col))) {
-      const targets = cells.filter((c) => c.col === col && (c.row !== from.row || c.col !== from.col));
-      if (targets.length > 0) bolts.push({ from, targets, wave: col });
-    }
-    void this._runChainAsync(gridId, cells, [], bolts, this._config?.combos.cookiePair);
+    // One bolt per CELL, each tied to that cell's own step, so a gem is struck exactly as it
+    // pops. A volley per COLUMN was what made the whole column light up at once: the sweep
+    // had been split down to the cell but the bolts had not, so eight gems shared one throw
+    // at the column's first step and only the pops kept the order.
+    const bolts: CookieBolt[] = cells
+      .filter((c) => c.row !== from.row || c.col !== from.col)
+      .map((c) => ({ from, targets: [{ row: c.row, col: c.col }], wave: c.wave }));
+    void this._runChainAsync(gridId, cells, [], bolts, this._config?.combos.cookiePair, [], false, armed);
   }
 
   /**
@@ -600,14 +636,14 @@ export class GameBoardsViewController extends GridsViewController {
     const cfg = this._config;
     if (!svc || !cfg) return;
 
-    const { cells, bolts, colours } = this._expand(svc.areaCells(at, cfg.combos.bombPair.radius));
+    const { cells, bolts, colours, armed } = this._expand(svc.areaCells(at, cfg.combos.bombPair.radius));
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
       this._dropColours(colours);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
-    void this._runChainAsync(gridId, free, [], bolts, this._config?.combos.bombPair, colours);
+    void this._runChainAsync(gridId, free, [], bolts, this._config?.combos.bombPair, colours, false, armed);
   }
 
   /**
@@ -633,14 +669,14 @@ export class GameBoardsViewController extends GridsViewController {
 
     // Anything already spoken for drops out — the item's own block above all, which is
     // claimed for the duration and must survive its own waves.
-    const { cells, bolts, colours } = this._expand(svc.bandCells(at, span, axis));
+    const { cells, bolts, colours, armed } = this._expand(svc.bandCells(at, span, axis));
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
       this._dropColours(colours);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
-    await this._runChainAsync(gridId, free, [], bolts, this._config?.combos.bombStripe, colours);
+    await this._runChainAsync(gridId, free, [], bolts, this._config?.combos.bombStripe, colours, false, armed);
   }
 
   /**
@@ -652,13 +688,13 @@ export class GameBoardsViewController extends GridsViewController {
     seed: readonly (Cell & { wave?: number })[],
     bombColors?: ReadonlyMap<string, number>,
     boosterReady?: (cell: Cell) => boolean
-  ): { cells: SweepCell[]; bolts: CookieBolt[]; colours: number[] } {
+  ): { cells: SweepCell[]; bolts: CookieBolt[]; colours: number[]; armed: ArmedBomb[] } {
     const svc = this._operations;
-    if (!svc) return { cells: [], bolts: [], colours: [] };
+    if (!svc) return { cells: [], bolts: [], colours: [], armed: [] };
 
     const bolts: CookieBolt[] = [];
     const colours: number[] = [];
-    const survivors: Cell[] = [];
+    const survivors: SweepCell[] = [];
     const cells = svc.expandSpecialClears(seed, {
       bombColors,
       boosterReady,
@@ -666,9 +702,10 @@ export class GameBoardsViewController extends GridsViewController {
       // is what stops two stripes in one row from each setting off the same cookie. A gem
       // waiting its turn in a combination is off limits for the same reason: its turn is
       // already booked, and firing it early is what made a converted board go off at once.
-      skipCell: (cell) => this._isCellClaimed(cell.row, cell.col) || this._isWaitingItsTurn(cell),
+      skipCell: (cell, viaColourClear) =>
+        this._isCellClaimed(cell.row, cell.col) || this._isWaitingItsTurn(cell, viaColourClear),
       excludeColours: this._firingColours,
-      onBoosterFired: (from) => survivors.push(from),
+      onBoosterFired: (from, wave) => survivors.push({ ...from, wave }),
       onCookieFired: (from, colour, targets) => {
         if (colour >= 0) colours.push(colour);
         const hits = targets.filter((t) => t.row !== from.row || t.col !== from.col);
@@ -679,7 +716,7 @@ export class GameBoardsViewController extends GridsViewController {
     // the meantime picks something else.
     for (const c of colours) this._firingColours.add(c);
     // A bomb with blasts left survives THIS clear — the one it just fired — and no more.
-    const kept = this._armSurvivingBoosters(survivors);
+    const { kept, armed } = this._armSurvivingBoosters(survivors);
     // And it stays out of everyone ELSE's clear until it has: an armed bomb waiting for
     // its next blast is immune. Without this a cascade landing on it in the meantime
     // simply ate it — the trace read "bomb N was gone before its next blast" — so the
@@ -700,7 +737,7 @@ export class GameBoardsViewController extends GridsViewController {
       if (this._comboQueue.has(itemId)) kept.add(this._cellKey(c.row, c.col));
     }
     const remaining = kept.size === 0 ? cells : cells.filter((c) => !kept.has(this._cellKey(c.row, c.col)));
-    return { cells: remaining, bolts, colours };
+    return { cells: remaining, bolts, colours, armed };
   }
 
   /** A stripe of either axis. Both clear a line; only the direction differs. */
@@ -729,14 +766,14 @@ export class GameBoardsViewController extends GridsViewController {
     for (const c of [at, partner]) {
       svc.createSpecial(c.row, c.col, svc.gemTypeAt(c.row, c.col), GemSpecial.None);
     }
-    const { cells, bolts, colours } = this._expand(svc.plusCells(at));
+    const { cells, bolts, colours, armed } = this._expand(svc.plusCells(at));
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
       this._dropColours(colours);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
-    void this._runChainAsync(gridId, free, [], bolts, this._config?.combos.stripePair, colours);
+    void this._runChainAsync(gridId, free, [], bolts, this._config?.combos.stripePair, colours, false, armed);
   }
 
   /**
@@ -826,10 +863,21 @@ export class GameBoardsViewController extends GridsViewController {
     return groups;
   }
 
-  /** Off limits to the player: mid-pop (claimed by a chain) or still in the air. */
+  /**
+   * Off limits to the player: mid-pop (claimed by a chain), still in the air, or queued by
+   * a combination.
+   *
+   * The queue is the cookie combination's own doing: it converts every gem of a colour and
+   * then fires them one at a time. Those gems are spoken for — the combination is mid-play
+   * and each has a turn booked — so the player may not move one out from under it. Left
+   * swappable, a gem could be traded away between being converted and being fired, and the
+   * combination would reach for a gem that had gone somewhere else.
+   */
   private _isCellBusy(row: number, col: number): boolean {
     const key = this._cellKey(row, col);
-    return this._claimedCells.has(key) || this._animatingCells.has(key);
+    if (this._claimedCells.has(key) || this._animatingCells.has(key)) return true;
+    const itemId = this._operations?.itemIdAt(row, col) ?? -1;
+    return itemId >= 0 && this._comboQueue.has(itemId);
   }
 
   /**
@@ -1011,14 +1059,14 @@ export class GameBoardsViewController extends GridsViewController {
     // Drop the cells another chain already owns and fire with what is left. Aborting on
     // any overlap meant that in a combination — where five stripes sweep rows and
     // columns that inevitably cross — every one after the first was skipped.
-    const { cells, bolts, colours } = this._expand([at]);
+    const { cells, bolts, colours, armed } = this._expand([at]);
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
       this._dropColours(colours);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
-    void this._runChainAsync(gridId, free, [], bolts, pace, colours);
+    void this._runChainAsync(gridId, free, [], bolts, pace, colours, false, armed);
   }
 
   /**
@@ -1032,7 +1080,9 @@ export class GameBoardsViewController extends GridsViewController {
     cells: SweepCell[],
     owned?: Set<string>,
     staged: CookieBolt[] = [],
-    pace?: ClearPace
+    pace?: ClearPace,
+    fromMatch = false,
+    armed: ArmedBomb[] = []
   ): Promise<void> {
     const svc = this._operations;
     const view = this._gridsView;
@@ -1057,21 +1107,69 @@ export class GameBoardsViewController extends GridsViewController {
     // the same thing. The flight is a fixed effect (`cookieBeam.strikeSec`); the spacing
     // is `special.sweepStepSec`. Here they cost one lead-in between them, once.
     const timing = pace ?? this._basePace();
+    // When each step starts, measured from the first. Accumulated rather than multiplied out
+    // because the gaps are not all equal: a pace may beat faster down a column than across
+    // to the next one, and a bolt thrown on `step × stepSec` would then drift further out of
+    // step with the pop it is supposed to land on with every column.
+    const startAt: number[] = [];
+    for (let i = 0; i < waves.length; i++) {
+      if (i === 0) {
+        startAt.push(0);
+        continue;
+      }
+      const sameColumn = byWave.get(waves[i])![0].col === byWave.get(waves[i - 1])![0].col;
+      startAt.push(startAt[i - 1] + (sameColumn ? (timing.rowStepSec ?? timing.stepSec) : timing.stepSec));
+    }
+
+    const startedAt = performance.now();
     if (staged.length > 0) {
       for (const bolt of staged) {
         const step = waves.indexOf(bolt.wave ?? 0);
         if (step < 0) continue;
-        void this._waitSec(step * timing.stepSec).then(() =>
-          view.animateCookieBeams(gridId, bolt.from, bolt.targets, timing.beamSec)
-        );
+        // The hold-off goes to the view, not to `_waitSec`. Sleeping on it here meant going
+        // through `setTimeout`, which the browser floors at a few milliseconds: a sweep
+        // spaced finer than that fired several volleys in the same frame and the cascade
+        // read as one flash.
+        void view.animateCookieBeams(gridId, bolt.from, bolt.targets, timing.beamSec, startAt[step]);
       }
       await this._waitSec(timing.beamSec);
     }
 
+    // Bombs that survived the blast, waiting for the clear to actually reach them before
+    // they start pulsing. Drained as the sweep passes their step.
+    const pending = [...armed].sort((a, b) => a.wave - b.wave);
     for (let i = 0; i < waves.length; i++) {
       const step = byWave.get(waves[i])!;
+      // How much of this step's slot is still ahead of us. Every visual gets it, because a
+      // step shorter than the timer's floor puts several of them in one frame — the loop is
+      // then already late and the effects would all start together.
+      const behind = Math.max(0, startAt[i] - (performance.now() - startedAt) / 1000);
+      // The bombs this step struck begin their pulse and open their blast gap here, not
+      // when the clear was planned. `<=` rather than `===` because a surviving bomb's own
+      // cell is out of the clear, so its wave need not be one the sweep stops on.
+      while (pending.length > 0 && pending[0].wave <= waves[i]) {
+        this._beginArmedPulse(gridId, pending.shift()!.itemId);
+      }
+      // With the step, not before the sweep. Shown up front it announced the whole clear at
+      // once — every cell of the board lighting up while the cookie pair's bolts were still
+      // on their way to the first column.
+      //
+      // One score for the MATCH itself, one per CELL for anything a booster took, so a
+      // sweep or a blast shows what it actually touched.
+      // How much of this step's slot is still ahead of us. Every visual gets it, because a
+      // step shorter than the timer's floor puts several of them in one frame — the loop is
+      // then already late and the effects would all start together.
+
+      if (fromMatch && waves[i] === 0) {
+        const middle = step[Math.floor(step.length / 2)];
+        if (middle) view.showScoreText(gridId, [middle], behind);
+      } else {
+        view.showScoreText(gridId, step, behind);
+      }
+      // A flash of light on everything this step takes, over the pop itself.
+      view.animatePopLight(gridId, step, behind);
       // Wave 0 within the call: these pop now, the stagger lives out here.
-      void view.animateClearMatches(gridId, step.map((c) => ({ row: c.row, col: c.col })));
+      void view.animateClearMatches(gridId, step.map((c) => ({ row: c.row, col: c.col })), behind);
       svc.clearMatchedCells(step);
       // Handed back the moment they are empty. A cell still ahead of the wave stays
       // claimed and stays solid, but one the wave has passed has nothing left to protect
@@ -1097,12 +1195,21 @@ export class GameBoardsViewController extends GridsViewController {
             freed = true;
           }
         }
-        if (freed) this._applyFall(gridId);
+        if (freed) this._requestFall(gridId);
       }
-      if (i < waves.length - 1 && timing.stepSec > 0) {
-        await this._waitSec(timing.stepSec);
+      const next = i + 1 < waves.length ? byWave.get(waves[i + 1]) : undefined;
+      if (next) {
+        // Down a column is a shorter beat than across to the next one, when a pace asks for
+        // it. Read off the cells rather than off the wave numbers, so how a path chooses to
+        // encode its order stays its own business.
+        const sameColumn = next[0].col === step[0].col;
+        const gap = sameColumn ? (timing.rowStepSec ?? timing.stepSec) : timing.stepSec;
+        if (gap > 0) await this._waitSec(gap);
       }
     }
+    // Anything left was struck beyond the last step the sweep stopped on — it has still
+    // been struck, so it goes off now rather than never.
+    for (const bomb of pending) this._beginArmedPulse(gridId, bomb.itemId);
   }
 
   private _cellKey(row: number, col: number): string {
@@ -1153,18 +1260,37 @@ export class GameBoardsViewController extends GridsViewController {
    * board, so the pulse and the blast it was waiting for never happened. In a converted
    * field every bomb did this to its neighbours and the whole board went at once.
    */
-  private _isWaitingItsTurn(cell: Cell): boolean {
+  private _isWaitingItsTurn(cell: Cell, viaColourClear = false): boolean {
     const itemId = this._operations?.itemIdAt(cell.row, cell.col) ?? -1;
     if (itemId < 0 || itemId === this._firingBooster) return false;
+    // A cookie taking this gem's colour is a DIRECT hit, not a blast passing over it: an
+    // armed bomb it reaches goes off now rather than seeing out the rest of its pulse. That
+    // is the ordinary chain rule — a booster set off indirectly fires — and the pulse was
+    // never meant to make it immune, only to keep another bomb's ring from spending its
+    // turn for it. Left waiting here, a cookie would clear it and the blast it was
+    // pulsing for would simply never happen.
+    if (viaColourClear && this._boosterBlasts.has(itemId)) return false;
     return this._comboQueue.has(itemId) || this._boosterBlasts.has(itemId);
   }
 
-  /** Keeps a bomb with blasts left out of its own clear, and books its next turn. */
-  private _armSurvivingBoosters(fired: readonly Cell[]): Set<string> {
+  /**
+   * Decides which bombs survive their own blast, and hands back both the cells to keep out
+   * of the clear and the bombs whose pulse has yet to start.
+   *
+   * The DECISION has to be made up front — the clear set cannot be built without knowing
+   * which cells are coming out of it — but nothing the player can see may start here. A
+   * clear travels: a bomb on step three of a sweep is not struck until the sweep reaches
+   * it, and starting its pulse and its blast timer at once had it blinking before the
+   * cookie's bolts had left, then blasting again early because the gap had been running
+   * the whole time. So the pulse and the timer are handed to {@link _sweepClearAsync},
+   * which starts them as each step lands.
+   */
+  private _armSurvivingBoosters(fired: readonly SweepCell[]): { kept: Set<string>; armed: ArmedBomb[] } {
     const svc = this._operations;
     const cfg = this._config;
     const kept = new Set<string>();
-    if (!svc || !cfg || fired.length === 0) return kept;
+    const armed: ArmedBomb[] = [];
+    if (!svc || !cfg || fired.length === 0) return { kept, armed };
 
     for (const at of fired) {
       const itemId = svc.itemIdAt(at.row, at.col);
@@ -1174,12 +1300,20 @@ export class GameBoardsViewController extends GridsViewController {
         this._boosterBlasts.delete(itemId);
         continue;
       }
+      // Recorded now, because this is what makes the bomb immune to everyone else's clear
+      // while it waits. Only the pulse and the gap are deferred.
       this._boosterBlasts.set(itemId, spent);
       kept.add(this._cellKey(at.row, at.col));
-      void this._scheduleNextBlastAsync(Match3Config.GRID_ID, itemId);
+      armed.push({ itemId, wave: at.wave });
     }
-    if (kept.size > 0) this._updateBlink(Match3Config.GRID_ID);
-    return kept;
+    return { kept, armed };
+  }
+
+  /** Starts a bomb pulsing and opens its gap — called when the clear actually reaches it. */
+  private _beginArmedPulse(gridId: number, itemId: number): void {
+    if (!this._boosterBlasts.has(itemId)) return;
+    this._updateBlink(gridId);
+    void this._scheduleNextBlastAsync(gridId, itemId);
   }
 
   /** The wait between one blast and the next, and then the next blast. */
@@ -1257,11 +1391,12 @@ export class GameBoardsViewController extends GridsViewController {
     bolts: CookieBolt[] = [],
     pace?: ClearPace,
     colours: number[] = [],
-    fromMatch = false
+    fromMatch = false,
+    armed: ArmedBomb[] = []
   ): Promise<void> {
     this._activeChains++;
     try {
-      await this._runChainBodyAsync(gridId, cells, specials, bolts, pace, fromMatch);
+      await this._runChainBodyAsync(gridId, cells, specials, bolts, pace, fromMatch, armed);
     } finally {
       // Whatever colour this chain was taking is fair game again.
       for (const c of colours) this._firingColours.delete(c);
@@ -1277,7 +1412,8 @@ export class GameBoardsViewController extends GridsViewController {
     specials: SpecialSpawn[] = [],
     bolts: CookieBolt[] = [],
     pace?: ClearPace,
-    fromMatch = false
+    fromMatch = false,
+    armed: ArmedBomb[] = []
   ): Promise<void> {
     const svc = this._operations;
     const view = this._gridsView;
@@ -1331,15 +1467,6 @@ export class GameBoardsViewController extends GridsViewController {
       // Read off the board before anything is cleared: the stripes are still standing
       // here, and once the sweep starts their gems are gone.
       this._playStripeWaves(gridId, wave);
-      // One score per MATCH; one per CELL when a booster is what cleared them, so a sweep
-      // or a blast shows every gem it actually touched.
-      if (fromMatch) {
-        const own = wave.filter((c) => c.wave === 0);
-        const middle = own[Math.floor(own.length / 2)] ?? wave[0];
-        if (middle) view.showScoreText(gridId, [middle]);
-      } else if (wave.length > 0) {
-        view.showScoreText(gridId, wave);
-      }
       // The clear travels as a wave: each step is popped AND removed from the model
       // before the next begins, so nothing falls until the wave has passed over it.
       // Clearing the whole set at once and staggering only the visuals left the gems
@@ -1349,7 +1476,9 @@ export class GameBoardsViewController extends GridsViewController {
         wave,
         owned,
         bolts.filter((b) => b.wave !== undefined),
-        timing
+        timing,
+        fromMatch,
+        armed
       );
       events.emitScoreChanged(this._gameModel!.score);
       events.emitGoalChanged(this._gameModel!.cleared, this._config!.goal);
@@ -1398,6 +1527,36 @@ export class GameBoardsViewController extends GridsViewController {
    * remaining steps would then take whatever slid in — the mess that showed up as soon
    * as two matches overlapped, and worst around a freshly made stripe.
    */
+  /**
+   * A fall pass, at most one per frame.
+   *
+   * {@link _applyFall} compacts and tops up the WHOLE board and rebuilds the object of every
+   * gem it moves, so its cost is the board, not the cells that just cleared. The sweep now
+   * has a step per cell rather than per column, and calling it on every step meant sixty-odd
+   * full passes inside a second for a cookie pair — thousands of object rebuilds, which is
+   * what made that combination stutter while ordinary matches were fine.
+   *
+   * Nothing is lost by coalescing them: no frame is drawn between two steps of the same
+   * frame, so a second pass in that frame could not have been seen. The first request in a
+   * frame runs at once — a hole must never be left open — and any others are folded into one
+   * pass on the next.
+   */
+  private _requestFall(gridId: number): void {
+    if (this._fallScheduled) return;
+    const now = performance.now();
+    if (now - this._lastFallAt >= GameBoardsViewController.FALL_MIN_MS) {
+      this._lastFallAt = now;
+      this._applyFall(gridId);
+      return;
+    }
+    this._fallScheduled = true;
+    requestAnimationFrame(() => {
+      this._fallScheduled = false;
+      this._lastFallAt = performance.now();
+      this._applyFall(gridId);
+    });
+  }
+
   private _applyFall(gridId: number): void {
     const svc = this._operations;
     const view = this._gridsView;

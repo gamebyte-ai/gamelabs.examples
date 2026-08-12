@@ -4,6 +4,8 @@ export enum Match3AssetIds {
   GemGreen = "Match3.GemGreen",
   GemYellow = "Match3.GemYellow",
   GemPurple = "Match3.GemPurple",
+  /** Radial glow, used for the flash a blast throws. */
+  Light = "Match3.Light",
   SfxSelect = "Match3.SfxSelect",
   SfxSwap = "Match3.SfxSwap",
   SfxWrong = "Match3.SfxWrong",

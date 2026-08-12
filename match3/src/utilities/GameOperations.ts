@@ -30,10 +30,22 @@ export type ExpandOptions = {
   boosterReady?: (cell: Cell) => boolean;
   /** Reports each cookie that fires, the colour it chose and what it takes. */
   onCookieFired?: (from: Cell, colour: number, targets: readonly Cell[]) => void;
-  /** Reports each bomb that fires, so a caller can decide whether it survives the blast. */
-  onBoosterFired?: (from: Cell) => void;
-  /** Cells already spoken for by another clear: reached, but never fired a second time. */
-  skipCell?: (cell: Cell) => boolean;
+  /**
+   * Reports each bomb that fires, with the sweep step it was reached on, so a caller can
+   * decide whether it survives the blast AND hold anything visible until the clear
+   * actually gets there.
+   */
+  onBoosterFired?: (from: Cell, wave: number) => void;
+  /**
+   * Cells already spoken for by another clear: reached, but never fired a second time.
+   *
+   * `viaColourClear` says HOW the cell was reached — true when a cookie's colour sweep
+   * put it here, false for a seed or for a stripe's or a blast's spread. A caller that
+   * holds a booster back until its own turn needs the difference: a blast merely passing
+   * over it should leave it waiting, but a cookie taking its colour is a direct hit and
+   * sets it off there and then.
+   */
+  skipCell?: (cell: Cell, viaColourClear: boolean) => boolean;
   /** Colours another clear is already taking, so two cookies cannot pick the same one. */
   excludeColours?: ReadonlySet<number>;
 };
@@ -365,9 +377,14 @@ export class GameOperations implements IInjectionTarget {
    */
   public boardCellsLeftToRight(): SweepCell[] {
     const out: SweepCell[] = [];
+    const span = this._config.rows;
     for (let col = 0; col < this._config.cols; col++) {
       for (let row = this._config.firstVisibleRow; row <= this._config.lastVisibleRow; row++) {
-        if (this.itemIdAt(row, col) >= 0) out.push({ row, col, wave: col });
+        if (this.itemIdAt(row, col) < 0) continue;
+        // A step per CELL, columns in order and each column top to bottom. Numbered by
+        // position rather than by a running count, so a column with holes in it keeps the
+        // same beat as a full one instead of racing ahead.
+        out.push({ row, col, wave: col * span + (row - this._config.firstVisibleRow) });
       }
     }
     return out;
@@ -433,6 +450,12 @@ export class GameOperations implements IInjectionTarget {
      * one-shot.
      */
     const fired = new Set<string>();
+    /**
+     * Cells a cookie's colour sweep reached. A booster in one of them was hit DIRECTLY, as
+     * opposed to being spread over by a stripe or a blast, and `skipCell` is told so — the
+     * caller decides what the difference means.
+     */
+    const viaColourClear = new Set<string>();
     /** Colours taken here, so two cookies in one clear cannot pick the same one. */
     const taken = new Set<number>(excludeColours ?? []);
     const key = (c: Cell): string => `${c.row},${c.col}`;
@@ -452,7 +475,7 @@ export class GameOperations implements IInjectionTarget {
       if (special === GemSpecial.None) continue;
       // One firing per gem, and none at all for a gem another clear already owns — it is
       // going off over there, not here.
-      if (fired.has(key(cell)) || skipCell?.(cell)) continue;
+      if (fired.has(key(cell)) || skipCell?.(cell, viaColourClear.has(key(cell)))) continue;
       fired.add(key(cell));
 
       // A sweep only ever reaches the playable window. A column sweep taken over the
@@ -468,7 +491,7 @@ export class GameOperations implements IInjectionTarget {
           continue;
         }
         swept = this.neighbourCells(cell.row, cell.col).filter((c) => this.itemIdAt(c.row, c.col) >= 0);
-        onBoosterFired?.({ row: cell.row, col: cell.col });
+        onBoosterFired?.({ row: cell.row, col: cell.col }, cell.wave);
       } else if (special === GemSpecial.ColorBomb) {
         // A swap names the colour (the gem it traded places with); anything else —
         // caught in a stripe, in a cascade — takes one from what is on the board.
@@ -497,6 +520,9 @@ export class GameOperations implements IInjectionTarget {
       // all go together, which is also when the bolts thrown at them land.
       const spreads = special !== GemSpecial.ColorBomb;
       for (const s of swept) {
+        // Recorded before the wave bookkeeping below, which may drop the cell as already
+        // covered — how it was reached still holds even when its wave does not improve.
+        if (special === GemSpecial.ColorBomb) viaColourClear.add(key(s));
         if (!this._grid.getCell(s.col, s.row)?.item) continue;
         const distance = Math.abs(s.row - cell.row) + Math.abs(s.col - cell.col);
         const wave = cell.wave + (spreads ? distance : 0);
@@ -722,27 +748,47 @@ export class GameOperations implements IInjectionTarget {
   }
 
   /**
-   * Two bombs in ONE column, one high and one low. Purely a test aid.
+   * Two cookies and two bombs in the middle of the board. Purely a test aid, laid out so
+   * that every cookie rule is reachable without waiting for one to occur naturally:
    *
-   * The arrangement is the case the fall is hardest to get right on: setting the lower one
-   * off empties the cells under the upper one, so the upper one is still coming down when
-   * its own turn arrives. Everything that reads wrong about a booster — popping at its
-   * cell instead of where it is, firing as though the gems above it had already landed —
-   * shows up here and nowhere as plainly.
+   *     🍪 🍪 💣 ·       the two cookies adjacent, a bomb beside the second
+   *     ·  ·  ·  ·
+   *     💣 ·  💣 💣      one bomb on its own, and two side by side
    *
-   * Bombs only for now; the cookies that used to sit beside them are out of the way while
-   * the bomb is what is being worked on.
+   * - Trade the cookies with each other for the pair: the whole board, a column at a time.
+   * - Trade either with the ordinary gem beside it for a plain colour clear.
+   * - Trade the second cookie with the bomb next to it for the cookie+bomb combination.
+   * - Trade the two bombs on the bottom row with each other for the bomb pair: one square
+   *   blast around the swap instead of two overlapping rings.
+   * - Fire the lone bomb with one cookie and then reach it with the other while it is
+   *   pulsing: that is the armed-bomb rule, and it needs a bomb that has ALREADY gone off
+   *   once, which no single swap can set up. It sits a clear column away from the pair so
+   *   that neither test sets the other off.
+   *
+   * Both bombs take whatever colour leaves the opening board match-free, so which colour a
+   * cookie has to be given to reach them is read off the board rather than fixed here.
    */
   private _seedBoosterPair(): void {
-    const col = Math.floor(this._config.cols / 2);
-    // Kept off the very bottom so the lower bomb has a ring of gems under it to take, and
-    // off the very top so the upper one is inside the window rather than in the reserve.
-    const low = this._config.lastVisibleRow - 1;
-    const high = this._config.firstVisibleRow + 1;
-    if (high >= low) return;
+    const cols = this._config.cols;
+    const row = this._config.firstVisibleRow + Math.floor(this._config.rows / 2);
+    const col = Math.max(0, Math.floor(cols / 2) - 1);
+    if (col + 1 >= cols) return;
 
-    this._seedSpecial(low, col, GemSpecial.Booster);
-    this._seedSpecial(high, col, GemSpecial.Booster);
+    this._seedSpecial(row, col, GemSpecial.ColorBomb);
+    this._seedSpecial(row, col + 1, GemSpecial.ColorBomb);
+    // Adjacent to the second cookie, so the combination is one swipe away.
+    if (col + 2 < cols) this._seedSpecial(row, col + 2, GemSpecial.Booster);
+    // Clear of the cookies, so firing it is a deliberate act rather than a side effect of
+    // whichever swap is being tried.
+    const below = row + 2;
+    if (below > this._config.lastVisibleRow) return;
+    this._seedSpecial(below, col, GemSpecial.Booster);
+    // Two more side by side for the bomb pair, with a column between them and the lone one
+    // above so that setting off either test leaves the other standing.
+    if (col + 3 < cols) {
+      this._seedSpecial(below, col + 2, GemSpecial.Booster);
+      this._seedSpecial(below, col + 3, GemSpecial.Booster);
+    }
   }
 
   /**
