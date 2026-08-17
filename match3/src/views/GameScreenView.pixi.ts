@@ -6,6 +6,8 @@ import {
   type ButtonComponentStyle,
   type Unsubscribe,
 } from "@gamebyte/gamelabsjs";
+import type { IInstanceResolver } from "@gamebyte/gamelabsjs";
+import { Match3Config } from "../Match3Config.js";
 import type { IGameScreenView } from "./IGameScreenView.js";
 
 export class GameScreenView extends ScreenView implements IGameScreenView {
@@ -14,19 +16,29 @@ export class GameScreenView extends ScreenView implements IGameScreenView {
   private _goalText: PIXI.Text | null = null;
   private readonly _settingsListeners = new Set<() => void>();
   private _screenWidth = 0;
+  private _config: Match3Config | null = null;
+
+  public override inject(resolver: IInstanceResolver): void {
+    super.inject(resolver);
+    this._config = resolver.getInstance(Match3Config);
+  }
 
   public override postInitialize(): void {
     super.postInitialize();
 
+    // Falls back to a plain instance so the readouts still build if the view is ever
+    // constructed without DI — the defaults are the same either way.
+    const hud = (this._config ?? new Match3Config()).hud;
+
     this._scoreText = new PIXI.Text({
       text: "Score: 0",
-      style: { fontFamily: "system-ui, sans-serif", fontSize: 22, fill: 0x000000 }
+      style: { fontFamily: "system-ui, sans-serif", fontSize: hud.scoreFontSize, fill: hud.color }
     });
     this.addChild(this._scoreText);
 
     this._goalText = new PIXI.Text({
       text: "",
-      style: { fontFamily: "system-ui, sans-serif", fontSize: 16, fill: 0x000000 }
+      style: { fontFamily: "system-ui, sans-serif", fontSize: hud.goalFontSize, fill: hud.color }
     });
     this._goalText.anchor.set(0.5, 0);
     this.addChild(this._goalText);

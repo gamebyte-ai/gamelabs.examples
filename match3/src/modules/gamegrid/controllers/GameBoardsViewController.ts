@@ -162,7 +162,10 @@ export class GameBoardsViewController extends GridsViewController {
   protected override createItemObjectOption(item: IGridItem, grid: IRectGrid): GameBoardItemObjectOptions {
     if (!(item instanceof GameBoardItem)) throw new Error("Expected GameBoardItem");
     const cfg = this._config ?? new Match3Config();
-    return new GameBoardItemObjectOptions(item.itemId, grid.preset, item.gemType, cfg.gemShadow, item.special, cfg.stripe, cfg.bomb, cfg.selection, cfg.combos.bombStripe.spanCells);
+    // The mask is the board's top edge, and it is handed to the gem rather than set on the
+    // renderer: renderer-wide it cut the backdrop, the frame and the shockwave too.
+    const maskTopZ = cfg.clipToBoard ? -cfg.boardDepth * 0.5 : null;
+    return new GameBoardItemObjectOptions(item.itemId, grid.preset, item.gemType, cfg.gemShadow, item.special, cfg.stripe, cfg.bomb, cfg.selection, cfg.combos.bombStripe.spanCells, maskTopZ);
   }
 
   /**
@@ -357,9 +360,13 @@ export class GameBoardsViewController extends GridsViewController {
       // edge for a whole block.
       void this._runGiantAsync(gridId, { row: r1, col: c1 }, giantColor);
     } else if (stripeSwap) {
-      // Centred on the cell the player swiped FROM — the gem they grabbed — with the
-      // neighbour it traded with as the other half of the cross.
-      this._detonateStripePlus(gridId, { row: r0, col: c0 }, { row: r1, col: c1 });
+      // Centred where the swap ENDED — the cell the dragged stripe was carried onto, which
+      // is both where the player is looking and where that stripe now stands. Centring on
+      // the cell they swiped FROM crossed the lines through the gem they had let go of.
+      //
+      // The same rule as every other combination here (the bomb pair, the merge): the move
+      // happens at its destination.
+      this._detonateStripePlus(gridId, { row: r1, col: c1 }, { row: r0, col: c0 });
     }
 
     // Starts this match's chain straight away — it claims its cells before its first
@@ -432,7 +439,7 @@ export class GameBoardsViewController extends GridsViewController {
       // A cell the board is already working through is off limits — the giant's block for
       // its whole life, and a sweep still travelling. It goes off there, not here.
       if (expanded.cells.some((c) => this._claimedCells.has(this._cellKey(c.row, c.col)))) {
-        this._dropColours(expanded.colours);
+        this._abandonClear(gridId, expanded.colours, expanded.armed);
         continue;
       }
 
@@ -452,7 +459,12 @@ export class GameBoardsViewController extends GridsViewController {
       }
     }
 
-    if (cells.length === 0) return;
+    if (cells.length === 0) {
+      // Nothing to clear, but a bomb may still have been armed — a group made entirely of
+      // bombs that all survived. They are owed their pulse just the same.
+      this._abandonClear(gridId, [], armed);
+      return;
+    }
 
     // Claimed synchronously, before the step's first await, so nothing else can hand the
     // same cells out while this one is starting.
@@ -480,7 +492,7 @@ export class GameBoardsViewController extends GridsViewController {
     const named = new Map<string, number>([[this._cellKey(at.row, at.col), color]]);
     const { cells, bolts, colours, armed } = this._expand([at], named);
     if (cells.some((c) => this._claimedCells.has(this._cellKey(c.row, c.col)))) {
-      this._dropColours(colours);
+      this._abandonClear(gridId, colours, armed);
       return;
     }
     // Claimed before the strike, so nothing falls into these cells or matches on them
@@ -494,14 +506,14 @@ export class GameBoardsViewController extends GridsViewController {
    * is actually on the board rather than off how the clear was planned, so it covers a
    * stripe caught in a match, one set off by another blast, and a converted one alike.
    */
-  private _playStripeWaves(gridId: number, cells: readonly Cell[]): void {
+  private _playStripeWaves(gridId: number, cells: readonly Cell[], delaySec = 0): void {
     const svc = this._operations;
     const view = this._gridsView;
     if (!svc || !view) return;
 
     for (const c of cells) {
       const kind = svc.specialAt(c.row, c.col);
-      if (this._isStripe(kind)) view.animateStripeWave(gridId, c, kind === GemSpecial.StripedRow);
+      if (this._isStripe(kind)) view.animateStripeWave(gridId, c, kind === GemSpecial.StripedRow, delaySec);
     }
   }
 
@@ -608,7 +620,12 @@ export class GameBoardsViewController extends GridsViewController {
     const fired = board.filter((c) => svc.specialAt(c.row, c.col) === GemSpecial.Booster);
     const { kept, armed } = this._armSurvivingBoosters(fired);
     const cells = kept.size === 0 ? board : board.filter((c) => !kept.has(this._cellKey(c.row, c.col)));
-    if (cells.length === 0) return;
+    if (cells.length === 0) {
+      // Nothing to clear, but a bomb may still have been armed — a group made entirely of
+      // bombs that all survived. They are owed their pulse just the same.
+      this._abandonClear(gridId, [], armed);
+      return;
+    }
 
     for (const c of cells) this._claimedCells.add(this._cellKey(c.row, c.col));
     // One volley per column, each tagged with the step it belongs to: the bolts reach a
@@ -639,7 +656,7 @@ export class GameBoardsViewController extends GridsViewController {
     const { cells, bolts, colours, armed } = this._expand(svc.areaCells(at, cfg.combos.bombPair.radius));
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
-      this._dropColours(colours);
+      this._abandonClear(gridId, colours, armed);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
@@ -672,7 +689,7 @@ export class GameBoardsViewController extends GridsViewController {
     const { cells, bolts, colours, armed } = this._expand(svc.bandCells(at, span, axis));
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
-      this._dropColours(colours);
+      this._abandonClear(gridId, colours, armed);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
@@ -769,7 +786,7 @@ export class GameBoardsViewController extends GridsViewController {
     const { cells, bolts, colours, armed } = this._expand(svc.plusCells(at));
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
-      this._dropColours(colours);
+      this._abandonClear(gridId, colours, armed);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
@@ -1062,7 +1079,7 @@ export class GameBoardsViewController extends GridsViewController {
     const { cells, bolts, colours, armed } = this._expand([at]);
     const free = cells.filter((c) => !this._claimedCells.has(this._cellKey(c.row, c.col)));
     if (free.length === 0) {
-      this._dropColours(colours);
+      this._abandonClear(gridId, colours, armed);
       return;
     }
     for (const c of free) this._claimedCells.add(this._cellKey(c.row, c.col));
@@ -1172,7 +1189,7 @@ export class GameBoardsViewController extends GridsViewController {
       // planned. Read here rather than up front for two reasons: a stripe reached on a later
       // step should not have thrown already, and the gem has to still be standing to be read
       // at all — which it is, because the clear below is what takes it.
-      this._playStripeWaves(gridId, step);
+      this._playStripeWaves(gridId, step, behind);
       // Wave 0 within the call: these pop now, the stagger lives out here.
       void view.animateClearMatches(gridId, step.map((c) => ({ row: c.row, col: c.col })), behind);
       svc.clearMatchedCells(step);
@@ -1341,6 +1358,22 @@ export class GameBoardsViewController extends GridsViewController {
       this._firingBooster = null;
     }
     this._updateBlink(gridId);
+  }
+
+  /**
+   * Gives back everything a clear took hold of but never used, when it turns out there is
+   * nothing left for it to do — every cell already spoken for by another one.
+   *
+   * The bombs matter as much as the colours. A bomb's pulse and its blast gap are started by
+   * the SWEEP, at the step that reaches it, so a bomb that was armed and then never handed
+   * to a sweep pulsed for ever: the record was there, which made it immune to everyone
+   * else's clear, but nothing existed to fire it. That is what stranded a bomb blinking
+   * after a cookie combination — the combination fires its converted gems one at a time, and
+   * one of them found every cell it wanted already claimed.
+   */
+  private _abandonClear(gridId: number, colours: number[], armed: ArmedBomb[]): void {
+    this._dropColours(colours);
+    for (const bomb of armed) this._beginArmedPulse(gridId, bomb.itemId);
   }
 
   /** Hands colours back when a clear is abandoned before a chain takes them on. */

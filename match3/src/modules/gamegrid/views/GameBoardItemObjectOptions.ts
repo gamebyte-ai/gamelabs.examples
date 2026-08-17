@@ -52,6 +52,15 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
   public readonly selection: GemSelectionOptions;
   /** Cells a merged bomb+stripe covers — how many times oversize to draw it. */
   public readonly giantSpanCells: number;
+  /**
+   * World Z of the board's top edge, or null for no mask.
+   *
+   * The gem clips against it, so the reserve stacked above the playable window stays out of
+   * sight. Carried per item because the clip has to be on the GEM's material and nothing
+   * else: as a renderer-wide plane it also cut the backdrop art, the frame and the stripe's
+   * shockwave, all of which live outside the board on purpose.
+   */
+  public readonly maskTopZ: number | null;
 
   public constructor(
     itemId: number,
@@ -62,7 +71,8 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
     stripe: GemStripeOptions,
     booster: GemBoosterOptions,
     selection: GemSelectionOptions,
-    giantSpanCells: number
+    giantSpanCells: number,
+    maskTopZ: number | null
   ) {
     super(itemId, gridPreset);
     this.gemType = gemType;
@@ -72,5 +82,6 @@ export class GameBoardItemObjectOptions extends GridItemObjectOptions {
     this.booster = booster;
     this.selection = selection;
     this.giantSpanCells = giantSpanCells;
+    this.maskTopZ = maskTopZ;
   }
 }

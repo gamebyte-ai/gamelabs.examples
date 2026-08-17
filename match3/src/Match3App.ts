@@ -65,12 +65,18 @@ export class Match3App extends GamelabsApp {
   }
 
   protected override loadAssets(): void {
-    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemRed, new URL("../assets/gem_red.svg", import.meta.url).href);
-    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemBlue, new URL("../assets/gem_blue.svg", import.meta.url).href);
-    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemGreen, new URL("../assets/gem_green.svg", import.meta.url).href);
-    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemYellow, new URL("../assets/gem_yellow.svg", import.meta.url).href);
-    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.GemPurple, new URL("../assets/gem_purple.svg", import.meta.url).href);
-    this.assetManager.load(AssetTypes.WorldTexture, Match3AssetIds.Light, new URL("../assets/light2.png", import.meta.url).href);
+    // One texture per COLOUR. What a gem DOES is drawn over it at runtime — the stripe's
+    // bars, the booster's letter, the cookie's wedges — so there is no file per special.
+    const texture = (id: Match3AssetIds, file: string): void => {
+      this.assetManager.load(AssetTypes.WorldTexture, id, new URL(`../assets/${file}`, import.meta.url).href);
+    };
+
+    texture(Match3AssetIds.GemRed, "gem_red.svg");
+    texture(Match3AssetIds.GemBlue, "gem_blue.svg");
+    texture(Match3AssetIds.GemGreen, "gem_green.svg");
+    texture(Match3AssetIds.GemYellow, "gem_yellow.svg");
+    texture(Match3AssetIds.GemPurple, "gem_purple.svg");
+    texture(Match3AssetIds.Light, "light2.png");
 
     // Audio
     this.assetManager.load(AssetTypes.Audio, Match3AssetIds.SfxSelect, new URL("../assets/sfx_select.wav", import.meta.url).href);
@@ -108,20 +114,14 @@ export class Match3App extends GamelabsApp {
     // way, which is why only the board looked washed out.
     this.world.scene.fog = null;
 
-    // Refilled gems start above the board and fall in, so without clipping they are
-    // visible outside the frame on the way down. Four world-space planes at the
-    // board's outer edge keep every gem inside it. Global (renderer-level) rather
-    // than per-material because gem materials are built by the grid module, which
-    // has no config access — and everything else in this scene is inside the board
-    // anyway, the outline sitting exactly on the boundary.
-    const halfW = this._config.boardWidth * 0.5;
-    const halfD = this._config.boardDepth * 0.5;
-    this.world.renderer.clippingPlanes = !this._config.clipToBoard ? [] : [
-      new THREE.Plane(new THREE.Vector3(1, 0, 0), halfW),
-      new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfW),
-      new THREE.Plane(new THREE.Vector3(0, 0, 1), halfD),
-      new THREE.Plane(new THREE.Vector3(0, 0, -1), halfD)
-    ];
+    // The reserve is masked on the GEM's own material (see `GameBoardItemObjectOptions`),
+    // not here. A renderer-wide plane clips every material in the scene, and three of them
+    // are deliberately outside the board: the backdrop art, the crystal frame, and the
+    // stripe's shockwave, which travels `stripe.wave.overshootCells` past the edge and off
+    // the screen. Clipped, the wave was sliced apart mid-flight and the art lost its top
+    // half. Local clipping is what lets one material opt in on its own.
+    this.world.renderer.clippingPlanes = [];
+    this.world.renderer.localClippingEnabled = true;
 
     this.diContainer.getInstance(UIEvents).createScreen(Match3UIIds.GameScreen, this._config.transitions.gameScreenEnter);
     this._boardView = this.viewFactory.createView(GameBoardsView);

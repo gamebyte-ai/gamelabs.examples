@@ -174,7 +174,8 @@ export class GameBoardItemObject extends GridItemObject {
     // faces say what they are.
     if (!isCookie && !isBooster) this._createStripes(options, size);
 
-    // Gem texture quad — or the cookie face, which is generated rather than loaded.
+    // The gem art is one texture per COLOUR, so what a gem does is drawn over it: the
+    // stripe's bars above, the booster's letter below, the cookie's wedges generated here.
     const assetId = GEM_ASSET_IDS_BY_TYPE[gemType % GEM_ASSET_IDS_BY_TYPE.length];
     const texture = isCookie
       ? cookieTexture(Match3Config.GEM_PALETTE)
@@ -190,12 +191,20 @@ export class GameBoardItemObject extends GridItemObject {
       );
     }
 
+    // The mask: everything the gem draws clips against the board's top edge, so the reserve
+    // stacked above the playable window is out of sight. Per-material rather than on the
+    // renderer, because a renderer-wide plane cut the backdrop art, the frame and the
+    // stripe's shockwave with it — all of which are meant to be outside the board.
+    const clip = options.maskTopZ === null ? undefined : [new THREE.Plane(new THREE.Vector3(0, 0, 1), -options.maskTopZ)];
+    if (clip && this._shadow) (this._shadow.material as THREE.Material).clippingPlanes = clip;
+
     const geom = new THREE.PlaneGeometry(size, size);
     const mat = new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
       alphaTest: 0.05,
       side: THREE.DoubleSide,
+      clippingPlanes: clip,
     });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.rotation.x = -Math.PI / 2;

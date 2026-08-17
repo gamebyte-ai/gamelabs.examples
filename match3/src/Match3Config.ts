@@ -157,12 +157,41 @@ export class Match3Config {
    * Dark, because the outline is neon: a bright saturated line only reads as glowing if
    * what surrounds it is darker than it is.
    */
-  public readonly backgroundColor = 0x070a14;
-  /** The grid's own panel, filling the board under the gems. Kept dark, as above. */
-  public readonly boardBackgroundColor = 0x101a2e;
+  public readonly backgroundColor = 0x9ad9ef;
+  /**
+   * The grid's own panel, filling the board under the gems. A LIGHT wash at low opacity, so
+   * the backdrop art reads through it and it works as a play area rather than a lid: solid
+   * and dark, it was a black rectangle laid over the artwork.
+   */
+  public readonly boardBackgroundColor = 0xffffff;
   /** 1 = solid, 0 = no panel drawn at all (the scene backdrop shows through). */
-  public readonly boardBackgroundOpacity = 1;
-  /** Outline framing the whole grid. Individual cells are not drawn. */
+  public readonly boardBackgroundOpacity = 0.38;
+  /** Corner radius of that panel, in cells. 0 gives the square corners it used to have. */
+  public readonly boardBackgroundRadiusCells = 0.55;
+  /**
+   * The art around and behind the board, in place of the drawn panel and outline.
+   *
+   * `frame` is the crystal border, drawn AROUND the playable area — it is a border in its
+   * own texture, so it has to be scaled up past the board for its opening to sit on the
+   * cells rather than over them. `openingFraction` says how much of the texture that
+   * opening takes; the frame is sized so the opening lands exactly on the board.
+   *
+   * `background` fills the screen behind everything. Sized in board widths rather than in
+   * pixels, so it holds its framing as the camera zooms across the aspect band.
+   */
+  public readonly art = {
+    frame: false,
+    /** How much of `board_frame.png` is the clear middle, edge to edge. */
+    openingFraction: 0.62,
+    background: false,
+    /** Backdrop size as a multiple of the board's width. */
+    backgroundScale: 2.6
+  };
+  /**
+   * Outline framing the whole grid, drawn rather than textured. Off once `art.frame` is on —
+   * the frame IS the outline, and drawing both puts a neon line across the artwork.
+   */
+  public readonly boardOutline = false;
   public readonly boardOutlineColor = 0x2de2ff;
   /**
    * The neon: rings drawn inside the outline, each one thicker and fainter, blended
@@ -181,9 +210,9 @@ export class Match3Config {
     opacity: 0.3
   };
   /** Outline stroke width in world units. */
-  public readonly boardOutlineThickness = 0.09;
+  public readonly boardOutlineThickness = 0.19;
   /** Gap between the outermost cells and the outline. */
-  public readonly boardOutlinePadding = 0.12;
+  public readonly boardOutlinePadding = 0;
 
   /**
    * Outer board size, outline padding included. Derived so the outline, the panel and
@@ -474,7 +503,7 @@ export class Match3Config {
     points: 60,
     color: "#ffffff",
     /** Height of the text as a fraction of a cell. */
-    sizeCells: 0.48,
+    sizeCells: 0.58,
     /**
      * Labels built up front and kept for the life of the board, so a busy clear allocates
      * nothing. The board is 64 cells, so this covers the worst case — every gem scoring at
@@ -483,13 +512,13 @@ export class Match3Config {
     poolSize: 100,
     /** How far it drifts up, in cells, over `sec`. */
     riseCells: 0.5,
-    sec: 0.3,
+    sec: 0.55,
     /**
      * How long the fade takes. Independent of `sec` so the label can keep climbing while it
      * goes, or hold its place and fade slowly after it has arrived. The label lives for
      * whichever of the two is longer.
      */
-    fadeSec: 0.3,
+    fadeSec: 0.55,
     /**
      * Easing for the climb. `none` is a steady drift for the whole life, which is what reads
      * as rising. An `*.out` curve finishes the travel in the first third and the label then
@@ -552,8 +581,26 @@ export class Match3Config {
      * the palette colour as it is, 1 makes every spark white.
      */
     brighten: 0,
+    /**
+     * Whether a spark ADDS to what is under it. True is light — right on a dark board, and
+     * washed out to nothing on a bright one, where a solid outlined disc is what reads.
+     */
+    additive: false,
     /** Board-wide ceiling handed to `ParticlesBinding`. */
     budget: 600
+  };
+  /**
+   * The score and goal readouts on the HUD. Sizes are in Pixi's logical pixels, so they are
+   * independent of the world's units and of how far the board is zoomed.
+   *
+   * The colour is here too because it belongs to the theme rather than to the layout: the
+   * readouts sit over whatever the board's backdrop happens to be, and dark art wants light
+   * text as surely as light art wants dark.
+   */
+  public readonly hud = {
+    scoreFontSize: 22,
+    goalFontSize: 16,
+    color: 0x000000
   };
   /** Pointer travel (px) separating a swipe from a tap. */
   public readonly swipeMinDistancePx = 24;

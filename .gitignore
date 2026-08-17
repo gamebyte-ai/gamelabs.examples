@@ -34,3 +34,11 @@ Thumbs.db
 # Misc
 .eslintcache
 *.tsbuildinfo
+
+# ongame build output (standalone game projects)
+games/
+.ongame/
+
+# Packaged playables + version snapshots (ongame-package output)
+*.zip
+**/*_20??????-????/

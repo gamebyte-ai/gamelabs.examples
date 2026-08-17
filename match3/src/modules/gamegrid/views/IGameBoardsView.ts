@@ -37,7 +37,7 @@ export interface IGameBoardsView extends IGridView {
    * The white shockwave a firing stripe throws both ways along its line, on past the
    * screen edge. Decoration only — nothing waits for it.
    */
-  animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean): void;
+  animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean, delaySec?: number): void;
   /**
    * Whether this cell's gem owns the cell but has not arrived in it yet — still above the
    * playable window. Such a gem is not a target for anything.

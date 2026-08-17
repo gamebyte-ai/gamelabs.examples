@@ -20,6 +20,39 @@ type Spark = {
  * `rate: 0` — this emitter never emits continuously. It only fires when the board asks
  * it to, via {@link burst}.
  */
+/**
+ * The spark's shape: a filled disc with a dark rim, drawn once and shared.
+ *
+ * A bare quad reads as a square pixel, which sits oddly against art that is drawn with an
+ * outline around everything. The rim is what makes a spark look like it belongs to the gem
+ * it came from — and it also holds the spark's edge against a light background, which a soft
+ * blob does not.
+ */
+let SPARK_TEXTURE: THREE.Texture | null = null;
+
+function sparkTexture(): THREE.Texture {
+  if (SPARK_TEXTURE) return SPARK_TEXTURE;
+
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const r = size / 2;
+
+  ctx.beginPath();
+  ctx.arc(r, r, r * 0.78, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  // Drawn in the art's own idiom: a dark line around the fill.
+  ctx.lineWidth = size * 0.13;
+  ctx.strokeStyle = "rgba(24,24,32,0.9)";
+  ctx.stroke();
+
+  SPARK_TEXTURE = new THREE.CanvasTexture(canvas);
+  return SPARK_TEXTURE;
+}
+
 export class GemPopEmitter extends WorldParticleEmitter<Spark> {
   private static readonly GEOMETRY = new THREE.PlaneGeometry(1, 1);
 
@@ -30,12 +63,21 @@ export class GemPopEmitter extends WorldParticleEmitter<Spark> {
   private readonly _speed: number;
   private readonly _sparkSize: number;
   private readonly _brighten: number;
+  private readonly _additive: boolean;
 
-  public constructor(budget: ParticleBudget, maxParticles: number, speed: number, sparkSize: number, brighten = 0) {
+  public constructor(
+    budget: ParticleBudget,
+    maxParticles: number,
+    speed: number,
+    sparkSize: number,
+    brighten = 0,
+    additive = false
+  ) {
     super(budget, { type: "match3.gem-pop", rate: 0, maxParticles, lifetime: { min: 0.22, max: 0.42 } });
     this._speed = speed;
     this._sparkSize = sparkSize;
     this._brighten = brighten;
+    this._additive = additive;
     this.behaviors.push(new SparkBehavior());
   }
 
@@ -61,14 +103,15 @@ export class GemPopEmitter extends WorldParticleEmitter<Spark> {
    * cells looked like they were still popping.
    */
   protected override createParticleData(): Spark {
-    // Unlit, and ADDITIVE: a spark only ever brightens what is under it. On plain blending
-    // the palette colours came out as dark flecks over the board, because that is what a mid
-    // tone laid over a lighter one is.
+    // Unlit, so a spark never picks up scene colour. Whether it ADDS to what is under it is
+    // a choice the art makes: additive suits a spark of light on a dark board, and washes out
+    // to nothing on a bright one, where a solid outlined disc is what reads.
     const mesh = new THREE.Mesh(
       GemPopEmitter.GEOMETRY,
       new THREE.MeshBasicMaterial({
+        map: sparkTexture(),
         transparent: true,
-        blending: THREE.AdditiveBlending,
+        blending: this._additive ? THREE.AdditiveBlending : THREE.NormalBlending,
         depthWrite: false
       })
     );

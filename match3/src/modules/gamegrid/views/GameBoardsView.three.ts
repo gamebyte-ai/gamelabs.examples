@@ -15,6 +15,10 @@ type ScoreLabel = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
 type LightFlash = THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
 
 export class GameBoardsView extends GridsView implements IGameBoardsView {
+  /** The backdrop art, below everything the board itself draws. */
+  private static readonly BACKGROUND_Y = 0.005;
+  /** The frame art, over the backdrop and under the board's panel. */
+  private static readonly FRAME_Y = 0.01;
   /** The board's own panel. Below the outline so an opaque panel cannot cover it. */
   private static readonly BACKDROP_Y = 0.015;
   /** Drawn over the panel, under the gem shadows (`0.045`). */
@@ -32,6 +36,8 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
   /** The neon rings behind the outline. See {@link _createBoardOutline}. */
   private readonly _outlineGlow: THREE.Mesh[] = [];
   private _backdrop: THREE.Mesh | null = null;
+  private _background: THREE.Mesh | null = null;
+  private _frame: THREE.Mesh | null = null;
   /** Gems in flight, keyed by item id — the id survives the grid rebuilding objects. */
   private readonly _falls = new Map<number, { height: number; speed: number }>();
   /**
@@ -98,7 +104,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     const fx = this._config.popParticles;
     if (fx.count > 0) {
       const budget = resolver.getInstance(ParticleBudget);
-      this._popEmitter = new GemPopEmitter(budget, fx.budget, fx.speed, fx.size * this._config.gridColumnSize, fx.brighten);
+      this._popEmitter = new GemPopEmitter(budget, fx.budget, fx.speed, fx.size * this._config.gridColumnSize, fx.brighten, fx.additive);
       this.add(this._popEmitter);
     }
   }
@@ -168,8 +174,10 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
 
   public override postInitialize(): void {
     super.postInitialize();
+    this._createBackground();
     this._createBoardBackdrop();
-    this._createBoardOutline();
+    this._createBoardFrame();
+    if (this._config?.boardOutline) this._createBoardOutline();
     this._fillScorePool();
   }
 
@@ -202,6 +210,65 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * the scene backdrop without drawing anything per cell. Sits under the outline and
    * the gems; opaque unless the configured opacity says otherwise.
    */
+  /**
+   * The full-screen backdrop. Sized in BOARD WIDTHS rather than in world units, so it keeps
+   * its framing as the camera zooms across the aspect band — pinning it to a fixed size
+   * would leave its edges inside the frustum on a wide screen.
+   *
+   * Drawn below everything the board owns, and with `depthWrite` off, so nothing sorts
+   * against it.
+   */
+  private _createBackground(): void {
+    const cfg = this._config;
+    if (!cfg || !cfg.art.background || this._background) return;
+
+    const texture = this.assetLoader.getAsset<THREE.Texture>(Match3AssetIds.Background);
+    if (!texture) return;
+
+    // The art is portrait, so it is fitted by WIDTH and its own aspect gives the height.
+    const width = cfg.boardWidth * cfg.art.backgroundScale;
+    const image = texture.image as { width?: number; height?: number } | undefined;
+    const aspect = image?.width && image.height ? image.height / image.width : 16 / 9;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, width * aspect),
+      new THREE.MeshBasicMaterial({ map: texture, depthWrite: false })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = GameBoardsView.BACKGROUND_Y;
+    this.add(mesh);
+    this._background = mesh;
+  }
+
+  /**
+   * The crystal border around the playable area.
+   *
+   * `board_frame.png` is a border WITHIN its own texture: the middle of the image is the
+   * clear opening. So the quad is scaled up until that opening measures the board — which
+   * is what `art.openingFraction` is for — and the border itself then falls outside the
+   * cells instead of over them.
+   */
+  private _createBoardFrame(): void {
+    const cfg = this._config;
+    if (!cfg || !cfg.art.frame || this._frame) return;
+
+    const texture = this.assetLoader.getAsset<THREE.Texture>(Match3AssetIds.BoardFrame);
+    if (!texture) return;
+
+    const opening = Math.max(0.05, Math.min(1, cfg.art.openingFraction));
+    const { width, depth } = this._boardExtents(cfg);
+    // Square art, so the longer side of the board decides the scale and the frame stays
+    // square rather than stretching into a rectangle.
+    const side = Math.max(width, depth) / opening;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(side, side),
+      new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = GameBoardsView.FRAME_Y;
+    this.add(mesh);
+    this._frame = mesh;
+  }
+
   private _createBoardBackdrop(): void {
     const cfg = this._config;
     if (!cfg || this._backdrop) return;
@@ -209,8 +276,9 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     if (cfg.boardBackgroundOpacity <= 0) return;
 
     const { width, depth } = this._boardExtents(cfg);
+    const radius = cfg.boardBackgroundRadiusCells * Math.min(cfg.gridColumnSize, cfg.gridRowSize);
     const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, depth),
+      this._roundedRectGeometry(width, depth, radius),
       new THREE.MeshBasicMaterial({
         color: cfg.boardBackgroundColor,
         // Only pay for blending when it is actually translucent; a solid panel goes
@@ -287,6 +355,34 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
     mesh.position.y = GameBoardsView.OUTLINE_Y;
     this.add(mesh);
     this._outline = mesh;
+  }
+
+  /**
+   * A filled rectangle with rounded corners, in the shape's own XY — rotated into the board
+   * plane by the caller.
+   *
+   * `radius` 0 gives a plain rectangle, and it is clamped to half the shorter side so an
+   * over-large value rounds to a stadium rather than folding the outline inside out.
+   */
+  private _roundedRectGeometry(width: number, depth: number, radius: number): THREE.ShapeGeometry {
+    const hw = width * 0.5;
+    const hd = depth * 0.5;
+    const r = Math.max(0, Math.min(radius, Math.min(hw, hd)));
+
+    const shape = new THREE.Shape();
+    shape.moveTo(-hw + r, -hd);
+    shape.lineTo(hw - r, -hd);
+    shape.quadraticCurveTo(hw, -hd, hw, -hd + r);
+    shape.lineTo(hw, hd - r);
+    shape.quadraticCurveTo(hw, hd, hw - r, hd);
+    shape.lineTo(-hw + r, hd);
+    shape.quadraticCurveTo(-hw, hd, -hw, hd - r);
+    shape.lineTo(-hw, -hd + r);
+    shape.quadraticCurveTo(-hw, -hd, -hw + r, -hd);
+    shape.closePath();
+
+    // Enough segments per corner that the curve reads as a curve at board scale.
+    return new THREE.ShapeGeometry(shape, 8);
   }
 
   /**
@@ -541,7 +637,7 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
    * dropped once it is well outside the frame — it leaves the screen rather than
    * stopping at the last cell.
    */
-  public animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean): void {
+  public animateStripeWave(gridId: number, at: { row: number; col: number }, alongRow: boolean, delaySec = 0): void {
     const cfg = this._config;
     const go = this.getGridObject(gridId);
     if (!cfg || !go || !cfg.stripe.wave.enabled || cfg.stripeWaveCellsPerSec <= 0) return;
@@ -599,12 +695,19 @@ export class GameBoardsView extends GridsView implements IGameBoardsView {
       pivot.add(bar);
       this.add(pivot);
 
+      // Held until its turn, like every other clear visual. Launching it where the sweep
+      // loop happened to be is what made a busy clear look broken: a step shorter than the
+      // timer's floor runs several steps in one frame, so every wave in that frame set off
+      // together while the pops they belong to were still correctly spaced.
+      pivot.visible = delaySec <= 0;
       // Constant speed: the pops it is travelling with are evenly spaced, so any easing
       // would put the wave front ahead of some of them and behind others.
       gsap.to(bar.position, {
         x: distance,
         duration: distance / (cfg.stripeWaveCellsPerSec * cellStep),
+        delay: delaySec,
         ease: "none",
+        onStart: () => (pivot.visible = true),
         onComplete: drop(pivot)
       });
     }
