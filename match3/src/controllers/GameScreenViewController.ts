@@ -2,6 +2,7 @@ import { UnsubscribeBag, UIEvents, AudioService, ISettingsModel, SettingsEvents,
 import type { ISettingsModel as ISettingsModelType } from "@gamebyte/gamelabsjs";
 import { GameEvents } from "../events/GameEvents.js";
 import { Match3AssetIds } from "../Match3AssetIds.js";
+import { Match3Config } from "../Match3Config.js";
 import type { IGameScreenView } from "../views/IGameScreenView.js";
 
 export class GameScreenViewController implements IViewController<IGameScreenView> {
@@ -11,6 +12,7 @@ export class GameScreenViewController implements IViewController<IGameScreenView
   private _audioService: AudioService | null = null;
   private _settingsModel: ISettingsModelType | null = null;
   private _settingsEvents: SettingsEvents | null = null;
+  private _config: Match3Config | null = null;
   private readonly _subs = new UnsubscribeBag();
 
   public inject(resolver: IInstanceResolver): void {
@@ -19,19 +21,23 @@ export class GameScreenViewController implements IViewController<IGameScreenView
     this._audioService = resolver.getInstance(AudioService);
     this._settingsModel = resolver.getInstance(ISettingsModel);
     this._settingsEvents = resolver.getInstance(SettingsEvents);
+    this._config = resolver.getInstance(Match3Config);
   }
 
   public initialize(view: IGameScreenView): void {
     this._view = view;
     view.setScore(0);
+    view.setGoal(0, this._config?.goal ?? 0);
 
     this._subs.add(this._gameEvents?.onScoreChanged((score) => this._view?.setScore(score)));
-    this._subs.add(this._gameEvents?.onPlaySfx((sfxId) => this._audioService?.playSfx(sfxId)));
+    this._subs.add(this._gameEvents?.onGoalChanged((cleared, goal) => this._view?.setGoal(cleared, goal)));
+    this._subs.add(this._gameEvents?.onPlaySfx((sfxId, rate) => this._audioService?.playSfx(sfxId, { rate })));
     this._subs.add(view.onSettingsTapped(() => this._uiEvents?.createPopup(SettingsUIIds.SettingsPopup)));
     this._subs.add(this._settingsEvents?.onValueChanged((name) => this._applyAudioSetting(name)));
 
     this._applyAllAudioSettings();
-    this._audioService?.playMusic(Match3AssetIds.MusicBg, { fadeInMs: 1000 });
+    // TEST: background music disabled — restore this line to bring it back.
+    // this._audioService?.playMusic(Match3AssetIds.MusicBg, { fadeInMs: 1000 });
     this._audioService?.resume();
   }
 

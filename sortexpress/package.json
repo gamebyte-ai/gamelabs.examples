@@ -1,0 +1,25 @@
+{
+  "name": "sortexpress",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@gamebyte/gamelabsjs": "^4.2.0",
+    "@js-basics/vector": "^2.2.5",
+    "@pixi/layout": "^3.2.0",
+    "@pixi/ui": "^2.3.2",
+    "gsap": "^3.12.5",
+    "pixi.js": "^8.16.0",
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.182.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}
