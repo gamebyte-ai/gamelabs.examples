@@ -1,0 +1,33 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+#app,
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+#stage .layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+#stage .layer.world3d {
+  z-index: 1;
+}
+#stage .layer.hud2d {
+  z-index: 2;
+}

@@ -37,6 +37,8 @@ npm run dev
 | `factorymatch` | 5189 | 3D physics collector (cannon-es via the optional `physics3d` module): pick shapes from a tumbling pile, match 3 of a kind |
 | `example_template` | 5190 | Minimum starting point: one `GameScreen` with a title and empty world — copy this folder to scaffold a new game |
 | `blockpuzzle` | 5191 | Grid block-placement puzzle: drag tray pieces onto an 8×8 grid, clear lines, with Hammer / Tray Refresh / Unit Block boosters and combo scoring |
+| `sortexpress` | 5192 | Colour-sorting playable: 3D lane board with a level flow and per-colour token counters |
+| `brickbreaker` | 5193 | Neon brick breaker: paddle, ball and hit-count bricks under a countdown timer, score and ball multiplier |
 
 See each example's own `README.md` (where present) for gameplay rules and implementation notes.
 
