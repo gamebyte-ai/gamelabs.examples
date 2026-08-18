@@ -140,14 +140,11 @@ export class MergeGameConfig {
   public readonly levels = {
     start: 1, // 1-based level to start on
     defs: [
-      // Level 1 — starts with two "lvl 6" items (kind index 5); goal: produce one
-      // each of the top three tiers (the 7th, 8th and 9th items → indices 6, 7, 8).
+      // Level 1 — empty board; goal: produce one each of the top three tiers
+      // (the 7th, 8th and 9th items → kind indices 6, 7, 8).
       {
         maxTier: 0,
-        balls: [
-          { kind: 5, x: 0.3, y: 0.88 },
-          { kind: 5, x: 0.7, y: 0.88 },
-        ],
+        balls: [],
         goals: [
           { tier: 6, count: 1 },
           { tier: 7, count: 1 },
