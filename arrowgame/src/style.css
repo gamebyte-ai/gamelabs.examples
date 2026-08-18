@@ -1,0 +1,40 @@
+/* Sizing lives here (imported by main.ts) so it gets BUNDLED — the playable build
+ * replaces the game's index.html with its own, discarding any <style> there, so
+ * inline index.html CSS would be lost. Covers both the game's #stage-in-body layout
+ * and the playable builder's #stage-in-#app wrapper. */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+/* #app is the playable builder's wrapper around #stage; #stage is the mount. */
+#app,
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.layer.world3d {
+  z-index: 1;
+}
+
+.layer.hud2d {
+  z-index: 2;
+}

@@ -1,0 +1,6 @@
+node_modules
+dist
+*.local
+
+# Local code-search index (in-sandbox tree-sitter; never publish/commit)
+.code-index/
